@@ -39,8 +39,8 @@
           inherit src;
 
           # uncomment if the project is a workspace
-          # pname = "nxrm_two_portal";
-          # version = "0.1.0";
+          pname = "nxrm_two_portal";
+          version = "0.1.0";
         };
 
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
