@@ -5,7 +5,7 @@ edition = "2021"
 description = "Translate the subset of the NXRM2 API into the new Central Portal Publisher API"
 
 [dependencies]
-axum = { version = "0.7.2", features = ["tracing", "macros"] }
+axum = { version = "0.7.3", features = ["tracing", "macros"] }
 color-eyre = "0.6.2"
 eyre = "0.6.11"
 tokio = { version = "1.35.1", features = ["macros", "fs", "rt-multi-thread", "tracing"] }
