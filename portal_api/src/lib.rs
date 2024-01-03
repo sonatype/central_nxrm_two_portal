@@ -108,6 +108,7 @@ impl PortalApiClient {
             println!("Deployment ID: {deployment_id}");
         } else {
             tracing::debug!("Response body: {:?}", response.text().await?);
+            eyre::bail!("Upload request failed");
         }
         tracing::trace!("Upload request to {url} - Complete");
 
