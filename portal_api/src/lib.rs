@@ -1,11 +1,9 @@
 use std::path::PathBuf;
 
 use api_types::PublishingType;
-use base64::engine::general_purpose::STANDARD;
-use base64::engine::Engine;
 use eyre::ContextCompat;
 use reqwest::{
-    header::{HeaderMap, HeaderValue, AUTHORIZATION, USER_AGENT},
+    header::{HeaderMap, HeaderValue, USER_AGENT},
     multipart::{Form, Part},
     Body, Client, ClientBuilder,
 };
@@ -13,27 +11,14 @@ use tokio::fs::File;
 use tokio_util::codec::{BytesCodec, FramedRead};
 
 pub mod api_types;
+pub mod credentials;
+
+pub use credentials::Credentials;
 
 pub const CENTRAL_HOST: &str = "https://central.sonatype.com";
 
 const API_ENDPOINT: &str = "/api/v1/publisher";
 const UPLOAD_ENDPOINT: &str = "/upload";
-
-pub struct Credentials {
-    username: String,
-    password: String,
-}
-
-impl Credentials {
-    pub fn new(username: String, password: String) -> Self {
-        Self { username, password }
-    }
-
-    fn as_bearer_token(&self) -> String {
-        let token = STANDARD.encode(format!("{}:{}", self.username, self.password));
-        format!("UserToken {token}")
-    }
-}
 
 /// The client for publishing via the Central Publisher Portal
 pub struct PortalApiClient {
@@ -60,7 +45,7 @@ impl PortalApiClient {
             HeaderValue::from_str(&format!("portal_api client ({})", env!("CARGO_PKG_NAME")))?;
         default_headers.insert(USER_AGENT, user_agent_header);
 
-        add_credentials_to_headers(&mut default_headers, &credentials)?;
+        credentials.add_credentials_to_headers(&mut default_headers)?;
 
         let client = ClientBuilder::default()
             .default_headers(default_headers)
@@ -75,7 +60,7 @@ impl PortalApiClient {
         deployment_name: &str,
         publishing_type: PublishingType,
         upload_bundle_path: &PathBuf,
-    ) -> eyre::Result<()> {
+    ) -> eyre::Result<String> {
         let url = format!("{}{API_ENDPOINT}{UPLOAD_ENDPOINT}", self.host);
         tracing::trace!("Upload request to {url} - Started");
 
@@ -102,26 +87,96 @@ impl PortalApiClient {
             .await?;
 
         tracing::trace!("Got response: {:?}", response);
-        if response.status().is_success() {
-            tracing::info!("Upload request succeded");
-            let deployment_id = response.text().await?;
-            println!("Deployment ID: {deployment_id}");
+        let deployment_id = if response.status().is_success() {
+            tracing::info!("Upload request succeeded");
+            response.text().await?
         } else {
             tracing::debug!("Response body: {:?}", response.text().await?);
             eyre::bail!("Upload request failed");
-        }
+        };
         tracing::trace!("Upload request to {url} - Complete");
 
-        Ok(())
+        Ok(deployment_id)
     }
 }
 
-fn add_credentials_to_headers(
-    headers: &mut HeaderMap,
-    credentials: &Credentials,
-) -> eyre::Result<()> {
-    let token_header = HeaderValue::from_str(&credentials.as_bearer_token())?;
-    headers.insert(AUTHORIZATION, token_header);
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use wiremock::matchers::{body_string_contains, header, method, path, query_param};
+    use wiremock::{Mock, MockBuilder, MockServer, ResponseTemplate};
 
-    Ok(())
+    #[tokio::test]
+    async fn successful_upload() {
+        let mock_server = MockServer::start().await;
+
+        common_test_expectations()
+            .respond_with(ResponseTemplate::new(200).set_body_string("test_deployment_id"))
+            .mount(&mock_server)
+            .await;
+
+        let mut client = PortalApiClient::client(
+            mock_server.uri(),
+            Credentials::new("test_username".to_string(), "test_password".to_string()),
+        )
+        .expect("Failed to construct client");
+
+        let deployment_id = client
+            .upload(
+                "test_deployment",
+                PublishingType::Automatic,
+                &PathBuf::from("Cargo.toml"), // Don't bother with client side validation of the bundle
+            )
+            .await
+            .expect("Failed to upload");
+
+        assert_eq!(deployment_id, "test_deployment_id");
+    }
+
+    #[ignore]
+    #[tokio::test]
+    async fn failed_upload() {
+        let mock_server = MockServer::start().await;
+
+        common_test_expectations()
+            .respond_with(
+                ResponseTemplate::new(500).set_body_string(r#"{"error": "example_error"}"#),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let mut client = PortalApiClient::client(
+            mock_server.uri(),
+            Credentials::new("test_username".to_string(), "test_password".to_string()),
+        )
+        .expect("Failed to construct client");
+
+        let error = client
+            .upload(
+                "test_deployment",
+                PublishingType::Automatic,
+                &PathBuf::from("Cargo.toml"), // Don't bother with client side validation of the bundle
+            )
+            .await
+            .expect_err("Failed to fail uploading");
+
+        assert!(error.to_string().contains("Failed to upload"));
+    }
+
+    fn common_test_expectations() -> MockBuilder {
+        Mock::given(method("POST"))
+            .and(path("/api/v1/publisher/upload"))
+            .and(header(
+                "Authorization",
+                "UserToken dGVzdF91c2VybmFtZTp0ZXN0X3Bhc3N3b3Jk",
+            ))
+            .and(query_param("name", "test_deployment"))
+            .and(query_param("publishingType", "AUTOMATIC"))
+            // expect the contents of the Cargo.toml file (as a stand-in for the bundle)
+            .and(body_string_contains("portal_api"))
+            // expect a multipart form field named "bundle" with a filename
+            .and(body_string_contains(
+                r#"form-data; name="bundle"; filename="Cargo.toml""#,
+            ))
+    }
 }
