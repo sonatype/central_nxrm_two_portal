@@ -9,6 +9,7 @@ use reqwest::{
 };
 use tokio::fs::File;
 use tokio_util::codec::{BytesCodec, FramedRead};
+use url::Url;
 
 pub mod api_types;
 pub mod credentials;
@@ -17,13 +18,13 @@ pub use credentials::Credentials;
 
 pub const CENTRAL_HOST: &str = "https://central.sonatype.com";
 
-const API_ENDPOINT: &str = "/api/v1/publisher";
-const UPLOAD_ENDPOINT: &str = "/upload";
+const API_ENDPOINT: &str = "/api/v1/publisher/";
+const UPLOAD_ENDPOINT: &str = "upload"; // relative to API_ENDPOINT
 
 /// The client for publishing via the Central Publisher Portal
 pub struct PortalApiClient {
     client: Client,
-    host: String,
+    host: Url,
 }
 
 impl PortalApiClient {
@@ -31,14 +32,14 @@ impl PortalApiClient {
     ///
     /// Provide [Credentials] to publish via a generated token.
     pub fn central_client(credentials: Credentials) -> eyre::Result<Self> {
-        Self::client(CENTRAL_HOST.to_string(), credentials)
+        Self::client(CENTRAL_HOST, credentials)
     }
 
     /// Publish to a compatible server
     ///
     /// Publish to an arbitrary server that implements the same API as Maven Central. Provide the host URL and generated
     /// [Credentials].
-    pub fn client(host: String, credentials: Credentials) -> eyre::Result<Self> {
+    pub fn client(host: &str, credentials: Credentials) -> eyre::Result<Self> {
         let mut default_headers = HeaderMap::new();
 
         let user_agent_header =
@@ -51,6 +52,8 @@ impl PortalApiClient {
             .default_headers(default_headers)
             .build()?;
 
+        let host = Url::parse(host)?;
+
         Ok(Self { client, host })
     }
 
@@ -61,8 +64,9 @@ impl PortalApiClient {
         publishing_type: PublishingType,
         upload_bundle_path: &PathBuf,
     ) -> eyre::Result<String> {
-        let url = format!("{}{API_ENDPOINT}{UPLOAD_ENDPOINT}", self.host);
-        tracing::trace!("Upload request to {url} - Started");
+        let url = self.host.join(API_ENDPOINT)?.join(UPLOAD_ENDPOINT)?;
+        let url_display = url.clone().to_string();
+        tracing::trace!("Upload request to {url_display} - Started");
 
         let file = File::open(upload_bundle_path).await?;
         let stream = FramedRead::new(file, BytesCodec::new());
@@ -79,7 +83,7 @@ impl PortalApiClient {
 
         let response = self
             .client
-            .post(&url)
+            .post(url)
             .query(&[("name", deployment_name)])
             .query(&[("publishingType", publishing_type)])
             .multipart(bundle)
@@ -94,7 +98,7 @@ impl PortalApiClient {
             tracing::debug!("Response body: {:?}", response.text().await?);
             eyre::bail!("Upload request failed");
         };
-        tracing::trace!("Upload request to {url} - Complete");
+        tracing::trace!("Upload request to {url_display} - Complete");
 
         Ok(deployment_id)
     }
@@ -107,7 +111,7 @@ mod tests {
     use wiremock::{Mock, MockBuilder, MockServer, ResponseTemplate};
 
     #[tokio::test]
-    async fn successful_upload() {
+    async fn successful_upload() -> eyre::Result<()> {
         let mock_server = MockServer::start().await;
 
         common_test_expectations()
@@ -116,10 +120,9 @@ mod tests {
             .await;
 
         let mut client = PortalApiClient::client(
-            mock_server.uri(),
+            &mock_server.uri(),
             Credentials::new("test_username".to_string(), "test_password".to_string()),
-        )
-        .expect("Failed to construct client");
+        )?;
 
         let deployment_id = client
             .upload(
@@ -127,15 +130,15 @@ mod tests {
                 PublishingType::Automatic,
                 &PathBuf::from("Cargo.toml"), // Don't bother with client side validation of the bundle
             )
-            .await
-            .expect("Failed to upload");
+            .await?;
 
         assert_eq!(deployment_id, "test_deployment_id");
+
+        Ok(())
     }
 
-    #[ignore]
     #[tokio::test]
-    async fn failed_upload() {
+    async fn failed_upload() -> eyre::Result<()> {
         let mock_server = MockServer::start().await;
 
         common_test_expectations()
@@ -146,10 +149,9 @@ mod tests {
             .await;
 
         let mut client = PortalApiClient::client(
-            mock_server.uri(),
+            &mock_server.uri(),
             Credentials::new("test_username".to_string(), "test_password".to_string()),
-        )
-        .expect("Failed to construct client");
+        )?;
 
         let error = client
             .upload(
@@ -158,9 +160,11 @@ mod tests {
                 &PathBuf::from("Cargo.toml"), // Don't bother with client side validation of the bundle
             )
             .await
-            .expect_err("Failed to fail uploading");
+            .expect_err("Succeeded, incorrectly");
 
-        assert!(error.to_string().contains("Failed to upload"));
+        assert!(error.to_string().contains("Upload request failed"));
+
+        Ok(())
     }
 
     fn common_test_expectations() -> MockBuilder {
