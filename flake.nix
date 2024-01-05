@@ -41,6 +41,10 @@
           # uncomment if the project is a workspace
           pname = "nxrm_two_portal";
           version = "0.1.0";
+
+          nativeBuildInputs = [ ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin (with pkgs; [
+            darwin.apple_sdk.frameworks.SystemConfiguration
+          ]);
         };
 
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
