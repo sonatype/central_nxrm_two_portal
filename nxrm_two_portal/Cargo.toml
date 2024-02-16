@@ -7,7 +7,7 @@ description = "Translate the subset of the NXRM2 API into the new Central Portal
 [dependencies]
 axum = { version = "0.7.4", features = ["tracing", "macros"] }
 color-eyre = "0.6.2"
-eyre = "0.6.11"
+eyre = "0.6.12"
 tokio = { version = "1.35.1", features = ["macros", "fs", "rt-multi-thread", "tracing"] }
 tracing = "0.1.40"
 tracing-subscriber = "0.3.18"
