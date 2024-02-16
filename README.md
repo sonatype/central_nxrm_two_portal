@@ -1,11 +1,29 @@
-# `nxrm_two_portal`
+# The `nxrm_two_portal` Project
+
+## `nxrm_two_portal`
+
+This is the core service focused on implementing a subset of the NXRM2 API that
+is used by various publishing plugins and tools. The service is currently
+implemented as an `axum` server, but in the future the intent is to pull out the
+core functionality into an AWS Lambda Function.
 
 ## `portal_api`
 
-The API related to publishing via the new Central Publisher Portal.
+This is the API related to publishing via the new Central Publisher Portal.
 
 - [OpenAPI Specification / Swagger UI](https://central.sonatype.com/api-doc)
 - [Publishing Guide](https://central.sonatype.org/publish-ea/publish-ea-guide/)
+
+## `example_projects`
+
+This is a collection of projects that demonstrate real-world usages of the
+plugins we intend to support with the translation API.
+
+### `nexus-staging-maven-plugin`
+
+- [`README.md`](example_projects/nexus-staging-maven-plugin/README.md)
+- [Plugin
+  `README.md`](https://github.com/sonatype/nexus-maven-plugins/blob/main/staging/maven-plugin/README.md)
 
 ## License
 
