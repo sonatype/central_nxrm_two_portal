@@ -3,6 +3,11 @@ use tokio::net::TcpListener;
 use tracing::instrument;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
+mod endpoints;
+mod errors;
+
+use endpoints::status::status_endpoint;
+
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
     tracing_subscriber::registry()
@@ -11,7 +16,7 @@ async fn main() -> eyre::Result<()> {
         .init();
 
     let app = Router::new()
-        .route("/service/local/status", get(status))
+        .route("/service/local/status", get(status_endpoint))
         .fallback(fallback);
 
     let listener = TcpListener::bind("0.0.0.0:2727").await?;
@@ -24,7 +29,8 @@ async fn main() -> eyre::Result<()> {
 #[instrument(skip(request))]
 async fn fallback(request: Request) -> (StatusCode, String) {
     tracing::debug!("Request to {}: {}", request.method(), request.uri());
-    tracing::trace!("Headers: {:?}", request.headers());
+    tracing::trace!("Headers: {:#?}", request.headers());
+    tracing::trace!("Authority: {:#?}", request.uri().authority());
     let bytes = axum::body::to_bytes(request.into_body(), usize::MAX).await;
     match bytes {
         Ok(bytes) => {
@@ -35,10 +41,8 @@ async fn fallback(request: Request) -> (StatusCode, String) {
         }
     }
 
-    (StatusCode::NOT_FOUND, "New method identified".to_string())
-}
-
-#[instrument]
-async fn status() -> (StatusCode, String) {
-    (StatusCode::OK, "Maybe it doesn't read the XML".to_string())
+    (
+        StatusCode::UNAUTHORIZED,
+        "New method identified".to_string(),
+    )
 }
