@@ -5,7 +5,7 @@ edition = "2021"
 description = "API Client for the Maven Central Publisher Portal"
 
 [dependencies]
-base64 = "0.21.7"
+base64 = "0.22.0"
 eyre = "0.6.12"
 reqwest = { version = "0.11.24", default-features = false, features = ["json", "multipart", "rustls-tls", "stream"] }
 serde = { version = "1.0.197", features = ["derive"] }
