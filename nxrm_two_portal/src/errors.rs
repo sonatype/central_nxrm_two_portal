@@ -1,6 +1,6 @@
 use axum::{http::StatusCode, response::IntoResponse};
 
-pub(crate) struct ApiError(eyre::Error);
+pub(crate) struct ApiError(pub(crate) eyre::Error);
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> axum::response::Response {

@@ -1,32 +1,25 @@
 use axum::extract::Host;
-use axum::http::header::CONTENT_TYPE;
-use axum::http::StatusCode;
-use axum::response::Response;
 use axum_extra::headers::UserAgent;
 use axum_extra::TypedHeader;
 use tracing::instrument;
 
 use crate::errors::ApiError;
+use crate::extract::Xml;
 
 #[instrument]
 pub(crate) async fn status_endpoint(
     Host(host): Host,
     TypedHeader(_user_agent): TypedHeader<UserAgent>,
-) -> Result<Response<String>, ApiError> {
+) -> Result<Xml<StatusResponse>, ApiError> {
     tracing::debug!("Request to get status");
-    let status = StatusResult::new(host);
-    let status_response = ex_em_ell::to_string_pretty(&status)?;
+    let status = StatusResponse::new(host);
 
-    let response = Response::builder()
-        .status(StatusCode::OK)
-        .header(CONTENT_TYPE, "application/xml")
-        .body(status_response)?;
-    Ok(response)
+    Ok(Xml(status))
 }
 
 #[derive(Debug, ex_em_ell::ToXmlDocument)]
 #[ex_em_ell(rename = "status")]
-struct StatusResult {
+pub(crate) struct StatusResponse {
     data: Data,
 }
 
@@ -57,7 +50,7 @@ struct Data {
     trial_license: bool,
 }
 
-impl StatusResult {
+impl StatusResponse {
     fn new(base_url: String) -> Self {
         Self {
             data: Data {
@@ -93,7 +86,7 @@ mod tests {
 
     #[test]
     fn test_xml_serialization() -> eyre::Result<()> {
-        let status_result = StatusResult::new("https://s01.oss.sonatype.org".to_string());
+        let status_result = StatusResponse::new("https://s01.oss.sonatype.org".to_string());
         let actual_state_xml = ex_em_ell::to_string_pretty(&status_result)?;
         let expected_state_xml = r#"<?xml version="1.0" encoding="utf-8"?>
 <status>
