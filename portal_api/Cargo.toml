@@ -7,7 +7,7 @@ description = "API Client for the Maven Central Publisher Portal"
 [dependencies]
 base64 = "0.22.0"
 eyre = "0.6.12"
-reqwest = { version = "0.11.24", default-features = false, features = ["json", "multipart", "rustls-tls", "stream"] }
+reqwest = { version = "0.11.25", default-features = false, features = ["json", "multipart", "rustls-tls", "stream"] }
 serde = { version = "1.0.197", features = ["derive"] }
 tokio = { version = "1.36.0", features = ["fs"] }
 tokio-util = { version = "0.7.10", features = ["codec"] }
