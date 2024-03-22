@@ -1,4 +1,6 @@
 use axum::extract::{Host, Path, Query};
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use axum_extra::headers::UserAgent;
 use axum_extra::TypedHeader;
 use serde::Deserialize;
@@ -49,9 +51,9 @@ pub(crate) async fn staging_profiles_start_endpoint(
     TypedHeader(_user_agent): TypedHeader<UserAgent>,
     Path(profile_id): Path<String>,
     Xml(staging_profiles_start_request): Xml<StagingProfilesStartRequest>,
-) -> Result<Xml<StagingProfilesStartResponse>, ApiError> {
+) -> Result<Xml<StagingProfilesPromoteResponse>, ApiError> {
     tracing::debug!("Request to start staging profile");
-    let staging_profiles_start_response = StagingProfilesStartResponse::new(
+    let staging_profiles_start_response = StagingProfilesPromoteResponse::new(
         format!("{profile_id}-1"),
         staging_profiles_start_request.data.description,
     );
@@ -68,6 +70,63 @@ pub(crate) struct StagingProfilesStartRequest {
 #[derive(Debug, PartialEq, ex_em_ell::FromXmlElement)]
 pub(crate) struct StagingProfilesStartRequestData {
     description: String,
+}
+
+#[instrument]
+pub(crate) async fn staging_deploy_by_repository_id(
+    TypedHeader(_user_agent): TypedHeader<UserAgent>,
+    Path((repository_id, file_path)): Path<(String, String)>,
+) -> Result<impl IntoResponse, ApiError> {
+    tracing::debug!("Request to upload file to staging repository");
+
+    Ok(StatusCode::CREATED)
+}
+
+#[instrument]
+pub(crate) async fn staging_deploy_by_repository_id_get(
+    TypedHeader(_user_agent): TypedHeader<UserAgent>,
+    Path((repository_id, file_path)): Path<(String, String)>,
+) -> Result<impl IntoResponse, ApiError> {
+    tracing::debug!("Request to get file from a staging repository");
+
+    Ok(StatusCode::NOT_FOUND)
+}
+
+#[instrument(skip(_staging_profiles_finish_request))]
+pub(crate) async fn staging_profiles_finish_endpoint(
+    Host(host): Host,
+    TypedHeader(_user_agent): TypedHeader<UserAgent>,
+    Path(profile_id): Path<String>,
+    Xml(_staging_profiles_finish_request): Xml<StagingProfilesFinishRequest>,
+) -> Result<StatusCode, ApiError> {
+    tracing::debug!("Request to finish profile");
+
+    Ok(StatusCode::OK)
+}
+
+#[derive(Debug, PartialEq, ex_em_ell::FromXmlDocument)]
+#[ex_em_ell(rename = "promoteRequest")]
+pub(crate) struct StagingProfilesFinishRequest {
+    data: StagingProfilesFinishRequestData,
+}
+
+#[derive(Debug, PartialEq, ex_em_ell::FromXmlElement)]
+pub(crate) struct StagingProfilesFinishRequestData {
+    staged_repository_id: String,
+    description: String,
+}
+
+#[instrument]
+pub(crate) async fn staging_repository(
+    Host(host): Host,
+    TypedHeader(_user_agent): TypedHeader<UserAgent>,
+    Path(repository_id): Path<String>,
+) -> Result<Xml<StagingRepositoryResponse>, ApiError> {
+    tracing::debug!("Request to get repository");
+
+    let response = StagingRepositoryResponse::new(&host, &repository_id);
+
+    Ok(Xml(response))
 }
 
 #[derive(Debug, ex_em_ell::ToXmlDocument)]
@@ -108,19 +167,25 @@ impl StagingProfilesResponse {
 
 #[derive(Debug, ex_em_ell::ToXmlDocument)]
 #[ex_em_ell(rename = "promoteResponse")]
-pub(crate) struct StagingProfilesStartResponse {
-    data: StagingProfilesStartResponseData,
+pub(crate) struct StagingProfilesPromoteResponse {
+    data: StagingProfilesResponseData,
 }
 
-impl StagingProfilesStartResponse {
+impl StagingProfilesPromoteResponse {
     fn new(staged_repository_id: String, description: String) -> Self {
         Self {
-            data: StagingProfilesStartResponseData {
+            data: StagingProfilesResponseData {
                 staged_repository_id,
                 description,
             },
         }
     }
+}
+
+#[derive(Debug, ex_em_ell::ToXmlElement)]
+struct StagingProfilesResponseData {
+    staged_repository_id: String,
+    description: String,
 }
 
 #[derive(Debug, ex_em_ell::ToXmlElement, ex_em_ell::NamedXmlElement)]
@@ -219,10 +284,62 @@ impl ex_em_ell::ToXmlElement for Properties {
     }
 }
 
-#[derive(Debug, ex_em_ell::ToXmlElement)]
-struct StagingProfilesStartResponseData {
-    staged_repository_id: String,
+#[derive(Debug, ex_em_ell::ToXmlDocument)]
+#[ex_em_ell(rename = "stagingProfileRepository")]
+pub(crate) struct StagingRepositoryResponse {
+    profile_id: String,
+    profile_name: String,
+    profile_type: String,
+    repository_id: String,
+    #[ex_em_ell(rename = "type")]
+    repository_type: String,
+    policy: String,
+    user_id: String,
+    user_agent: String,
+    ip_address: String,
+    #[ex_em_ell(rename = "repositoryURI")]
+    repository_uri: String,
+    created: String,
+    created_date: String,
+    created_timestamp: String,
+    updated: String,
+    updated_date: String,
+    updated_timestamp: String,
     description: String,
+    provider: String,
+    release_repository_id: String,
+    release_repository_name: String,
+    notifications: String,
+    transitioning: bool,
+}
+
+impl StagingRepositoryResponse {
+    fn new(base_url: &str, repository_id: &str) -> Self {
+        Self {
+            profile_id: "profile_id".to_string(), // TODO: do we need this to be persisted?
+            profile_name: "profile_name".to_string(),
+            profile_type: "repository".to_string(),
+            repository_id: repository_id.to_string(),
+            repository_type: "closed".to_string(),
+            policy: "release".to_string(),
+            user_id: "user_id".to_string(),
+            user_agent: "user_agent".to_string(),
+            ip_address: "ip_address".to_string(),
+            repository_uri: format!("{base_url}/content/repositories/{repository_id}"),
+            created: "1970-01-01T00:00:00.000Z".to_string(),
+            created_date: "Thu Jan 1 00:00:00 UTC 1970".to_string(),
+            created_timestamp: "0".to_string(),
+            updated: "1970-01-01T00:00:00.000Z".to_string(),
+            updated_date: "Thu Jan 1 00:00:00 UTC 1970".to_string(),
+            updated_timestamp: "0".to_string(),
+            description: "description".to_string(),
+            provider: "maven2".to_string(),
+            release_repository_id: "releases".to_string(),
+            release_repository_name: "Releases".to_string(),
+            notifications: "0".to_string(),
+            transitioning: false,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -346,7 +463,7 @@ mod tests {
 
     #[test]
     fn test_xml_serialization_staging_profiles_start_response() -> eyre::Result<()> {
-        let staging_profiles_start_response = StagingProfilesStartResponse::new(
+        let staging_profiles_start_response = StagingProfilesPromoteResponse::new(
             "comexample-1".to_string(),
             "com.example:example:0.1.0".to_string(),
         );
@@ -358,6 +475,42 @@ mod tests {
     <description>com.example:example:0.1.0</description>
   </data>
 </promoteResponse>"#;
+
+        assert_eq!(actual_xml, expected_xml);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_xml_serialization_repository_response() -> eyre::Result<()> {
+        let repository_response =
+            StagingRepositoryResponse::new("https://s01.oss.sonatype.org", "comexample-1");
+        let actual_xml = ex_em_ell::to_string_pretty(&repository_response)?;
+        let expected_xml = r#"<?xml version="1.0" encoding="utf-8"?>
+<stagingProfileRepository>
+  <profileId>profile_id</profileId>
+  <profileName>profile_name</profileName>
+  <profileType>repository</profileType>
+  <repositoryId>comexample-1</repositoryId>
+  <type>closed</type>
+  <policy>release</policy>
+  <userId>user_id</userId>
+  <userAgent>user_agent</userAgent>
+  <ipAddress>ip_address</ipAddress>
+  <repositoryURI>https://s01.oss.sonatype.org/content/repositories/comexample-1</repositoryURI>
+  <created>1970-01-01T00:00:00.000Z</created>
+  <createdDate>Thu Jan 1 00:00:00 UTC 1970</createdDate>
+  <createdTimestamp>0</createdTimestamp>
+  <updated>1970-01-01T00:00:00.000Z</updated>
+  <updatedDate>Thu Jan 1 00:00:00 UTC 1970</updatedDate>
+  <updatedTimestamp>0</updatedTimestamp>
+  <description>description</description>
+  <provider>maven2</provider>
+  <releaseRepositoryId>releases</releaseRepositoryId>
+  <releaseRepositoryName>Releases</releaseRepositoryName>
+  <notifications>0</notifications>
+  <transitioning>false</transitioning>
+</stagingProfileRepository>"#;
 
         assert_eq!(actual_xml, expected_xml);
 

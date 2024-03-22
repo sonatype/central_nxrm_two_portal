@@ -1,5 +1,5 @@
 use axum::{
-    routing::{get, post},
+    routing::{get, post, put},
     Router,
 };
 use tokio::net::TcpListener;
@@ -12,8 +12,9 @@ mod extract;
 use endpoints::{
     fallback::fallback,
     staging::{
+        staging_deploy_by_repository_id, staging_deploy_by_repository_id_get,
         staging_profile_evaluate_endpoint, staging_profiles_endpoint,
-        staging_profiles_start_endpoint,
+        staging_profiles_finish_endpoint, staging_profiles_start_endpoint, staging_repository,
     },
     status::status_endpoint,
 };
@@ -31,7 +32,16 @@ async fn main() -> eyre::Result<()> {
         .route(
             "/profiles/:profile_id/start",
             post(staging_profiles_start_endpoint),
-        );
+        )
+        .route(
+            "/deployByRepositoryId/:staging_repository_id/*file_path",
+            put(staging_deploy_by_repository_id).get(staging_deploy_by_repository_id_get),
+        )
+        .route(
+            "/profiles/:profile_id/finish",
+            post(staging_profiles_finish_endpoint),
+        )
+        .route("/repository/:repository_id", get(staging_repository));
 
     let app = Router::new()
         .route("/service/local/status", get(status_endpoint))
