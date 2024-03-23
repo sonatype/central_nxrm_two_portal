@@ -1137,6 +1137,7 @@ dependencies = [
  "color-eyre",
  "ex_em_ell",
  "eyre",
+ "itertools",
  "mime",
  "serde",
  "tokio",

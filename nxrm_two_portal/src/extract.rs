@@ -9,14 +9,18 @@ use axum::http::Request;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::response::Response;
+use tracing::instrument;
 
 use crate::errors::ApiError;
 
 pub(crate) struct Xml<T>(pub(crate) T);
 
 impl<T: ex_em_ell::ToXmlDocument> Xml<T> {
+    #[instrument(skip(self))]
     fn into_response_or_api_error(self) -> Result<Response<String>, ApiError> {
         let response_xml = ex_em_ell::to_string_pretty(&self.0)?;
+
+        tracing::trace!("Sending response: {response_xml}");
 
         let response = Response::builder()
             .status(StatusCode::OK)
@@ -41,9 +45,18 @@ where
 {
     type Rejection = ApiError;
 
+    #[instrument(skip(req, state))]
     async fn from_request(req: Request<Body>, state: &S) -> Result<Self, Self::Rejection> {
         if xml_content_type(req.headers()) {
             let bytes = Bytes::from_request(req, state).await?;
+
+            if tracing::enabled!(tracing::Level::TRACE) {
+                match std::str::from_utf8(&bytes) {
+                    Ok(request) => tracing::trace!("Got request: {request}"),
+                    Err(e) => tracing::trace!("Could not parse request as UTF-8: {e}"),
+                }
+            }
+
             let response: T = ex_em_ell::from_reader(bytes.as_ref())?;
             Ok(Xml(response))
         } else {

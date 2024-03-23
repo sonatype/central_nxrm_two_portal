@@ -12,7 +12,7 @@ mod extract;
 use endpoints::{
     fallback::fallback,
     staging::{
-        staging_deploy_by_repository_id, staging_deploy_by_repository_id_get,
+        staging_bulk_promote, staging_deploy_by_repository_id, staging_deploy_by_repository_id_get,
         staging_profile_evaluate_endpoint, staging_profiles_endpoint,
         staging_profiles_finish_endpoint, staging_profiles_start_endpoint, staging_repository,
     },
@@ -41,7 +41,8 @@ async fn main() -> eyre::Result<()> {
             "/profiles/:profile_id/finish",
             post(staging_profiles_finish_endpoint),
         )
-        .route("/repository/:repository_id", get(staging_repository));
+        .route("/repository/:repository_id", get(staging_repository))
+        .route("/bulk/promote", post(staging_bulk_promote));
 
     let app = Router::new()
         .route("/service/local/status", get(status_endpoint))

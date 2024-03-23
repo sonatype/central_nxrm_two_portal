@@ -3,6 +3,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum_extra::headers::UserAgent;
 use axum_extra::TypedHeader;
+use itertools::Itertools;
 use serde::Deserialize;
 use tracing::instrument;
 
@@ -129,6 +130,37 @@ pub(crate) async fn staging_repository(
     Ok(Xml(response))
 }
 
+#[instrument(skip(staging_bulk_promote_request))]
+pub(crate) async fn staging_bulk_promote(
+    TypedHeader(_user_agent): TypedHeader<UserAgent>,
+    Xml(staging_bulk_promote_request): Xml<StagingBulkPromoteRequest>,
+) -> Result<StatusCode, ApiError> {
+    tracing::debug!(
+        "Request to bulk promote repositories: {}",
+        staging_bulk_promote_request
+            .data
+            .staged_repository_ids
+            .into_iter()
+            .map(|ws| ws.0)
+            .join(", ")
+    );
+
+    Ok(StatusCode::OK)
+}
+
+#[derive(Debug, PartialEq, ex_em_ell::FromXmlDocument)]
+#[ex_em_ell(rename = "stagingActionRequest")]
+pub(crate) struct StagingBulkPromoteRequest {
+    data: StagingBulkPromoteRequestData,
+}
+
+#[derive(Debug, PartialEq, ex_em_ell::FromXmlElement)]
+pub(crate) struct StagingBulkPromoteRequestData {
+    staged_repository_ids: Vec<WrappedString>,
+    description: String,
+    auto_drop_after_release: bool,
+}
+
 #[derive(Debug, ex_em_ell::ToXmlDocument)]
 #[ex_em_ell(rename = "stagingProfiles")]
 pub(crate) struct StagingProfilesEvaluateResponse {
@@ -247,7 +279,7 @@ impl StagingProfile {
     }
 }
 
-#[derive(Debug, ex_em_ell::NamedXmlElement)]
+#[derive(Debug, PartialEq, ex_em_ell::NamedXmlElement)]
 #[ex_em_ell(name = "string")]
 struct WrappedString(String);
 
@@ -258,6 +290,22 @@ impl ex_em_ell::ToXmlElement for WrappedString {
         tag: &str,
     ) -> Result<(), ex_em_ell::errors::XmlWriteError> {
         ex_em_ell::xml_utils::write_simple_tag(writer, tag, &self.0)
+    }
+}
+
+impl ex_em_ell::FromXmlElement for WrappedString {
+    fn from_xml_element<R: std::io::Read>(
+        reader: &mut ex_em_ell::xml::EventReader<R>,
+        element_name: &ex_em_ell::xml::name::OwnedName,
+        _element_attributes: &[ex_em_ell::xml::attribute::OwnedAttribute],
+        _element_namespace: &ex_em_ell::xml::namespace::Namespace,
+    ) -> Result<Self, ex_em_ell::errors::XmlReadError>
+    where
+        Self: Sized,
+    {
+        let value: String = ex_em_ell::xml_utils::read_simple_tag(reader, element_name)?;
+
+        Ok(WrappedString(value))
     }
 }
 
@@ -513,6 +561,27 @@ mod tests {
 </stagingProfileRepository>"#;
 
         assert_eq!(actual_xml, expected_xml);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_xml_serialization_staging_bulk_promote_request() -> eyre::Result<()> {
+        let actual_xml = "<stagingActionRequest><data><stagedRepositoryIds><string>comexample-1</string></stagedRepositoryIds><description>description</description><autoDropAfterRelease>true</autoDropAfterRelease></data></stagingActionRequest>";
+        let actual_staging_bulk_promote_request: StagingBulkPromoteRequest =
+            ex_em_ell::from_reader(actual_xml.as_bytes())?;
+        let expected_bulk_promote_request = StagingBulkPromoteRequest {
+            data: StagingBulkPromoteRequestData {
+                staged_repository_ids: vec![WrappedString("comexample-1".to_string())],
+                description: "description".to_string(),
+                auto_drop_after_release: true,
+            },
+        };
+
+        assert_eq!(
+            actual_staging_bulk_promote_request,
+            expected_bulk_promote_request
+        );
 
         Ok(())
     }
