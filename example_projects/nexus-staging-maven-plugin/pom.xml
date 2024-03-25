@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>io.github.amy-keibler</groupId>
+  <artifactId>example_nexus_staging_maven_plugin</artifactId>
+  <version>0.0.1</version>
+
+  <name>${project.groupId}:${project.artifactId}</name>
+  <description>An example library that demonstrates the usage of the nexus-staging-maven-plugin</description>
+  <url>https://github.com/amy-keibler/nxrm_two_portal</url>
+  <scm>
+    <connection>scm:git:git://github.com/amy-keibler/nxrm_two_portal.git</connection>
+    <developerConnection>scm:git:ssh://github.com:amy-keibler/nxrm_two_portal.git</developerConnection>
+    <url>https://github.com/amy-keibler/nxrm_two_portal/tree/main</url>
+  </scm>
+
+  <licenses>
+    <license>
+      <name>The Apache License, Version 2.0</name>
+      <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+    </license>
+    <license>
+      <name>MIT License</name>
+      <url>https://www.opensource.org/licenses/mit-license.php</url>
+    </license>
+  </licenses>
+
+  <developers>
+    <developer>
+      <name>Amy Keibler</name>
+      <email>akeibler@sonatype.com</email>
+      <organization>Sonatype</organization>
+      <organizationUrl>https://www.sonatype.com</organizationUrl>
+    </developer>
+  </developers>
+
+
+  <properties>
+    <maven.compiler.source>17</maven.compiler.source>
+    <maven.compiler.target>17</maven.compiler.target>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  </properties>
+
+  <profiles>
+      <profile>
+          <id>release</id>
+          <build>
+              <plugins>
+                  <!-- Publishing requires source jars -->
+                  <plugin>
+                      <groupId>org.apache.maven.plugins</groupId>
+                      <artifactId>maven-source-plugin</artifactId>
+                      <version>3.3.0</version>
+                      <executions>
+                          <execution>
+                              <id>attach-sources</id>
+                              <phase>verify</phase>
+                              <goals>
+                                  <goal>jar-no-fork</goal>
+                              </goals>
+                          </execution>
+                      </executions>
+                  </plugin>
+                  <!-- Publishing requires javadocs jars -->
+                  <plugin>
+                      <groupId>org.apache.maven.plugins</groupId>
+                      <artifactId>maven-javadoc-plugin</artifactId>
+                      <version>3.5.0</version>
+                      <executions>
+                          <execution>
+                              <id>attach-sources</id>
+                              <phase>verify</phase>
+                              <goals>
+                                  <goal>jar</goal>
+                              </goals>
+                          </execution>
+                      </executions>
+                  </plugin>
+                  <!-- Publishing requires PGP signatures -->
+                  <plugin>
+                      <groupId>org.apache.maven.plugins</groupId>
+                      <artifactId>maven-gpg-plugin</artifactId>
+                      <version>3.1.0</version>
+                      <executions>
+                          <execution>
+                              <id>sign-artifacts</id>
+                              <phase>verify</phase>
+                              <goals>
+                                  <goal>sign</goal>
+                              </goals>
+                          </execution>
+                      </executions>
+                  </plugin>
+                <plugin>
+                    <groupId>org.sonatype.plugins</groupId>
+                    <artifactId>nexus-staging-maven-plugin</artifactId>
+                    <version>1.6.13</version>
+                    <extensions>true</extensions>
+                    <configuration>
+                        <serverId>central.testing</serverId>
+                        <nexusUrl>http://localhost:2727</nexusUrl>
+                        <autoReleaseAfterClose>true</autoReleaseAfterClose>
+                    </configuration>
+                </plugin>
+              </plugins>
+          </build>
+      </profile>
+  </profiles>
+</project>

@@ -52,6 +52,31 @@
         nxrm_two_portal = craneLib.buildPackage (commonArgs // {
           inherit cargoArtifacts;
         });
+
+        mavenSettingsFile = pkgs.writeText "settings.xml" ''
+                    <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                    xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 https://maven.apache.org/xsd/settings-1.0.0.xsd">
+                      <servers>
+                        <server>
+                           <id>central.testing</id>
+          	               <username>fake_username</username>
+          	               <password>fake_password</password>
+                         </server>
+                       </servers>
+                     </settings>
+        '';
+
+        mvnLocal = pkgs.writeShellApplication {
+          name = "mvnLocal";
+
+          runtimeInputs = with pkgs; [ maven ];
+
+          text = ''
+            mvn \
+              --settings='${mavenSettingsFile}' \
+              "$@";
+          '';
+        };
       in
       rec {
         checks = {
@@ -94,6 +119,13 @@
 
             # Nix tooling
             nixpkgs-fmt
+
+            # Java tooling
+            maven
+            jdk17
+            gnupg
+
+            mvnLocal
           ];
         };
       });
