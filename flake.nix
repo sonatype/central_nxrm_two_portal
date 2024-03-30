@@ -98,12 +98,11 @@
         packages.nxrm_two_portal = nxrm_two_portal;
         packages.default = packages.nxrm_two_portal;
 
-        # uncomment if there is a binary to be run
-        # apps.nxrm_two_portal = flake-utils.lib.mkApp {
-        #   drv = packages.nxrm_two_portal;
-        #   name = "nxrm_two_portal";
-        # };
-        # apps.default = apps.nxrm_two_portal;
+        apps.nxrm_two_portal = flake-utils.lib.mkApp {
+          drv = packages.nxrm_two_portal;
+          name = "nxrm_two_portal";
+        };
+        apps.default = apps.nxrm_two_portal;
 
         devShells.default = pkgs.mkShell {
           inputsFrom = builtins.attrValues self.checks.${system};
