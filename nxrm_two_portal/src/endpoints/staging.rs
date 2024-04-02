@@ -1,14 +1,16 @@
-use axum::extract::{Host, Path, Query};
+use axum::extract::{Host, Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum_extra::headers::UserAgent;
 use axum_extra::TypedHeader;
 use itertools::Itertools;
+use repository::traits::Repository;
 use serde::Deserialize;
 use tracing::instrument;
 
 use crate::errors::ApiError;
 use crate::extract::Xml;
+use crate::state::AppState;
 
 #[instrument]
 pub(crate) async fn staging_profile_evaluate_endpoint(
@@ -46,16 +48,20 @@ pub(crate) async fn staging_profiles_endpoint(
     Ok(Xml(staging_profiles))
 }
 
-#[instrument(skip(staging_profiles_start_request))]
-pub(crate) async fn staging_profiles_start_endpoint(
+#[instrument(skip(app_state, staging_profiles_start_request))]
+pub(crate) async fn staging_profiles_start_endpoint<R: Repository>(
     Host(host): Host,
     TypedHeader(_user_agent): TypedHeader<UserAgent>,
     Path(profile_id): Path<String>,
+    State(app_state): State<AppState<R>>,
     Xml(staging_profiles_start_request): Xml<StagingProfilesStartRequest>,
 ) -> Result<Xml<StagingProfilesPromoteResponse>, ApiError> {
     tracing::debug!("Request to start staging profile");
+
+    let repository = app_state.repository.start("todo", &profile_id).await?;
+
     let staging_profiles_start_response = StagingProfilesPromoteResponse::new(
-        format!("{profile_id}-1"),
+        repository.get_repository_id(),
         staging_profiles_start_request.data.description,
     );
 

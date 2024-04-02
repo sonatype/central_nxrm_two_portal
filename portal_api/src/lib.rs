@@ -21,6 +21,8 @@ pub const CENTRAL_HOST: &str = "https://central.sonatype.com";
 const API_ENDPOINT: &str = "/api/v1/publisher/";
 const UPLOAD_ENDPOINT: &str = "upload"; // relative to API_ENDPOINT
 
+const UPLOAD_MIME_STR: &str = "application/octet-stream";
+
 /// The client for publishing via the Central Publisher Portal
 pub struct PortalApiClient {
     client: Client,
@@ -58,16 +60,30 @@ impl PortalApiClient {
     }
 
     #[tracing::instrument(skip(self))]
-    pub async fn upload(
+    pub async fn upload_from_memory(
+        &mut self,
+        deployment_name: &str,
+        publishing_type: PublishingType,
+        upload_bundle_contents: Vec<u8>,
+    ) -> eyre::Result<String> {
+        let part = Part::bytes(upload_bundle_contents)
+            .file_name("bundle.zip")
+            .mime_str(UPLOAD_ENDPOINT)?;
+
+        let deployment_id = self
+            .upload_part(deployment_name, publishing_type, part)
+            .await?;
+
+        Ok(deployment_id)
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub async fn upload_from_file(
         &mut self,
         deployment_name: &str,
         publishing_type: PublishingType,
         upload_bundle_path: &PathBuf,
     ) -> eyre::Result<String> {
-        let url = self.host.join(API_ENDPOINT)?.join(UPLOAD_ENDPOINT)?;
-        let url_display = url.clone().to_string();
-        tracing::trace!("Upload request to {url_display} - Started");
-
         let file = File::open(upload_bundle_path).await?;
         let stream = FramedRead::new(file, BytesCodec::new());
         let body = Body::wrap_stream(stream);
@@ -78,7 +94,26 @@ impl PortalApiClient {
             .to_string();
         let part = Part::stream(body)
             .file_name(file_name)
-            .mime_str("application/octet-stream")?;
+            .mime_str(UPLOAD_MIME_STR)?;
+
+        let deployment_id = self
+            .upload_part(deployment_name, publishing_type, part)
+            .await?;
+
+        Ok(deployment_id)
+    }
+
+    #[tracing::instrument(skip(self))]
+    async fn upload_part(
+        &mut self,
+        deployment_name: &str,
+        publishing_type: PublishingType,
+        part: Part,
+    ) -> eyre::Result<String> {
+        let url = self.host.join(API_ENDPOINT)?.join(UPLOAD_ENDPOINT)?;
+        let url_display = url.clone().to_string();
+        tracing::trace!("Upload request to {url_display} - Started");
+
         let bundle = Form::new().part("bundle", part);
 
         let response = self
@@ -125,7 +160,7 @@ mod tests {
         )?;
 
         let deployment_id = client
-            .upload(
+            .upload_from_file(
                 "test_deployment",
                 PublishingType::Automatic,
                 &PathBuf::from("Cargo.toml"), // Don't bother with client side validation of the bundle
@@ -154,7 +189,7 @@ mod tests {
         )?;
 
         let error = client
-            .upload(
+            .upload_from_file(
                 "test_deployment",
                 PublishingType::Automatic,
                 &PathBuf::from("Cargo.toml"), // Don't bother with client side validation of the bundle

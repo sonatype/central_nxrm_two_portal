@@ -51,7 +51,7 @@ pub async fn main() -> eyre::Result<()> {
     let deployment_name = cli.deployment_name.unwrap_or("Upload".to_string());
 
     let deployment_id = api_client
-        .upload(&deployment_name, Automatic, &cli.upload_bundle)
+        .upload_from_file(&deployment_name, Automatic, &cli.upload_bundle)
         .await?;
 
     println!("Deployment ID: {deployment_id}");

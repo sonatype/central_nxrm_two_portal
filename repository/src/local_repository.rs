@@ -27,6 +27,8 @@ impl LocalRepository {
 
         let repository_indexes = RwLock::new(HashMap::new());
 
+        tracing::debug!("Created new local repository: {:?}", root.path());
+
         Ok(Self {
             root,
             repository_indexes,

@@ -50,6 +50,10 @@ impl RepositoryKey {
         }
     }
 
+    pub fn get_repository_id(&self) -> String {
+        format!("{}-{}", self.profile_id, self.repository_index)
+    }
+
     /// Convenience function to translate the `repository_index` into its component parts
     ///
     /// API calls operate on the user's repository once it has been opened, rather than the profile
