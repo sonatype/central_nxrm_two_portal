@@ -1,13 +1,19 @@
+use auth::auth;
 use axum::{
+    middleware,
     routing::{get, post, put},
     Router,
 };
 use tokio::net::TcpListener;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
+use repository::local_repository::LocalRepository;
+
+mod auth;
 mod endpoints;
 mod errors;
 mod extract;
+mod state;
 
 use endpoints::{
     fallback::fallback,
@@ -18,6 +24,7 @@ use endpoints::{
     },
     status::status_endpoint,
 };
+use state::AppState;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
@@ -25,6 +32,8 @@ async fn main() -> eyre::Result<()> {
         .with(fmt::layer())
         .with(EnvFilter::from_default_env())
         .init();
+
+    let app_state = AppState::new(LocalRepository::new()?);
 
     let staging_endpoints = Router::new()
         .route("/profile_evaluate", get(staging_profile_evaluate_endpoint))
@@ -42,11 +51,13 @@ async fn main() -> eyre::Result<()> {
             post(staging_profiles_finish_endpoint),
         )
         .route("/repository/:repository_id", get(staging_repository))
-        .route("/bulk/promote", post(staging_bulk_promote));
+        .route("/bulk/promote", post(staging_bulk_promote))
+        .route_layer(middleware::from_fn(auth));
 
     let app = Router::new()
         .route("/service/local/status", get(status_endpoint))
         .nest("/service/local/staging", staging_endpoints)
+        .with_state(app_state)
         .fallback(fallback);
 
     let listener = TcpListener::bind("0.0.0.0:2727").await?;

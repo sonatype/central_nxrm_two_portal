@@ -25,6 +25,43 @@ plugins we intend to support with the translation API.
 - [Plugin
   `README.md`](https://github.com/sonatype/nexus-maven-plugins/blob/main/staging/maven-plugin/README.md)
 
+## Local Setup
+
+For local development, we recommend using
+[Nix](https://github.com/DeterminateSystems/nix-installer) +
+[Direnv](https://direnv.net/). This will provide a development environment with
+all required dependencies.
+
+Using the Nix setup provides convenience wrappers for Maven have been provided
+(`mvnLocalProxy`, `mvnStagingProxy`, & `mvnProductionProxy`). They expect valid
+settings files with a server `central.testing` and a name
+`settings-<environment>.xml` (`local`, `staging`, & `production`). There is a
+`settings-example.xml` included for convenience.
+
+### Common commands
+
+#### Build & Run Tests
+
+``` shell
+nix flake check
+```
+
+### Run The Local Proxy
+
+``` shell
+RUST_LOG=debug,h2=info,hyper=info,rusttls=info nix run
+```
+
+Note: This reduces some of the noise around HTTPS requests to the Portal
+
+### Non-Nix
+
+You'll need the following installed:
+
+- Rust (`cargo`)
+- Java (`java`, `mvn`)
+- GPG (`gpg`)
+
 ## License
 
 This code is licensed under the dual-license approach of [MIT](./LICENSE-MIT) OR

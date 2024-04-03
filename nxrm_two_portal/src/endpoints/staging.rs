@@ -1,14 +1,21 @@
-use axum::extract::{Host, Path, Query};
+use axum::extract::{Host, Path, Query, Request, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
+use axum::Extension;
 use axum_extra::headers::UserAgent;
 use axum_extra::TypedHeader;
+use futures::stream::TryStreamExt;
 use itertools::Itertools;
+use portal_api::api_types::PublishingType;
+use portal_api::{Credentials, PortalApiClient};
+use repository::traits::{Repository, RepositoryKey};
 use serde::Deserialize;
 use tracing::instrument;
 
+use crate::auth::UserToken;
 use crate::errors::ApiError;
 use crate::extract::Xml;
+use crate::state::AppState;
 
 #[instrument]
 pub(crate) async fn staging_profile_evaluate_endpoint(
@@ -46,16 +53,24 @@ pub(crate) async fn staging_profiles_endpoint(
     Ok(Xml(staging_profiles))
 }
 
-#[instrument(skip(staging_profiles_start_request))]
-pub(crate) async fn staging_profiles_start_endpoint(
+#[instrument(skip(app_state, user_token, staging_profiles_start_request))]
+pub(crate) async fn staging_profiles_start_endpoint<R: Repository>(
     Host(host): Host,
     TypedHeader(_user_agent): TypedHeader<UserAgent>,
     Path(profile_id): Path<String>,
+    State(app_state): State<AppState<R>>,
+    Extension(user_token): Extension<UserToken>,
     Xml(staging_profiles_start_request): Xml<StagingProfilesStartRequest>,
 ) -> Result<Xml<StagingProfilesPromoteResponse>, ApiError> {
     tracing::debug!("Request to start staging profile");
+
+    let repository = app_state
+        .repository
+        .start(&user_token.token_username, &profile_id)
+        .await?;
+
     let staging_profiles_start_response = StagingProfilesPromoteResponse::new(
-        format!("{profile_id}-1"),
+        repository.get_repository_id(),
         staging_profiles_start_request.data.description,
     );
 
@@ -73,12 +88,35 @@ pub(crate) struct StagingProfilesStartRequestData {
     description: String,
 }
 
-#[instrument]
-pub(crate) async fn staging_deploy_by_repository_id(
+#[instrument(skip(app_state, user_token, request))]
+pub(crate) async fn staging_deploy_by_repository_id<R: Repository>(
     TypedHeader(_user_agent): TypedHeader<UserAgent>,
     Path((repository_id, file_path)): Path<(String, String)>,
+    State(app_state): State<AppState<R>>,
+    Extension(user_token): Extension<UserToken>,
+    request: Request,
 ) -> Result<impl IntoResponse, ApiError> {
     tracing::debug!("Request to upload file to staging repository");
+
+    if file_path.contains("maven-metadata.xml") {
+        tracing::debug!("Skipping adding of a metadata file to the repository");
+        return Ok(StatusCode::CREATED);
+    }
+
+    let repository_key =
+        RepositoryKey::from_user_id_and_repository_id(&user_token.token_username, &repository_id)?;
+
+    app_state
+        .repository
+        .add_file(
+            &repository_key,
+            file_path,
+            request
+                .into_body()
+                .into_data_stream()
+                .map_err(|e| eyre::eyre!("Issue with the request body: {e}")),
+        )
+        .await?;
 
     Ok(StatusCode::CREATED)
 }
@@ -93,14 +131,32 @@ pub(crate) async fn staging_deploy_by_repository_id_get(
     Ok(StatusCode::NOT_FOUND)
 }
 
-#[instrument(skip(_staging_profiles_finish_request))]
-pub(crate) async fn staging_profiles_finish_endpoint(
+#[instrument(skip(app_state, user_token, staging_profiles_finish_request))]
+pub(crate) async fn staging_profiles_finish_endpoint<R: Repository>(
     Host(host): Host,
     TypedHeader(_user_agent): TypedHeader<UserAgent>,
     Path(profile_id): Path<String>,
-    Xml(_staging_profiles_finish_request): Xml<StagingProfilesFinishRequest>,
+    State(app_state): State<AppState<R>>,
+    Extension(user_token): Extension<UserToken>,
+    Xml(staging_profiles_finish_request): Xml<StagingProfilesFinishRequest>,
 ) -> Result<StatusCode, ApiError> {
     tracing::debug!("Request to finish profile");
+
+    let repository_key = RepositoryKey::from_user_id_and_repository_id(
+        &user_token.token_username,
+        &staging_profiles_finish_request.data.staged_repository_id,
+    )?;
+
+    let zip_data = app_state.repository.finish(&repository_key).await?;
+    let zip_data = zip_data.as_buffer()?;
+
+    let credentials = Credentials::new(user_token.token_username, user_token.token_password);
+    let mut portal_api_client =
+        PortalApiClient::client("https://staging.portal.central.sonatype.dev", credentials)?;
+
+    portal_api_client
+        .upload_from_memory("Test", PublishingType::UserManaged, zip_data)
+        .await?;
 
     Ok(StatusCode::OK)
 }

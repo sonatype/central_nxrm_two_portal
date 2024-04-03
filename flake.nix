@@ -53,29 +53,35 @@
           inherit cargoArtifacts;
         });
 
-        mavenSettingsFile = pkgs.writeText "settings.xml" ''
-                    <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-                    xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 https://maven.apache.org/xsd/settings-1.0.0.xsd">
-                      <servers>
-                        <server>
-                           <id>central.testing</id>
-          	               <username>fake_username</username>
-          	               <password>fake_password</password>
-                         </server>
-                       </servers>
-                     </settings>
-        '';
-
-        mvnLocal = pkgs.writeShellApplication {
-          name = "mvnLocal";
+        mkMvn = { name, settingsFile }: pkgs.writeShellApplication {
+          inherit name;
 
           runtimeInputs = with pkgs; [ maven ];
 
           text = ''
+            #!/usr/bin/env bash
+            git_root=$(git rev-parse --show-toplevel)
+            settings_file="$git_root/${settingsFile}"
             mvn \
-              --settings='${mavenSettingsFile}' \
-              "$@";
+               --settings="$settings_file" \
+              -Dcentral.url='http://localhost:2727'\
+               "$@";
           '';
+        };
+
+        mvnLocalProxy = mkMvn {
+          name = "mvnLocalProxy";
+          settingsFile = "settings-local.xml";
+        };
+
+        mvnStagingProxy = mkMvn {
+          name = "mvnStagingProxy";
+          settingsFile = "settings-staging.xml";
+        };
+
+        mvnProductionProxy = mkMvn {
+          name = "mvnProductionProxy";
+          settingsFile = "settings-production.xml";
         };
       in
       rec {
@@ -98,12 +104,11 @@
         packages.nxrm_two_portal = nxrm_two_portal;
         packages.default = packages.nxrm_two_portal;
 
-        # uncomment if there is a binary to be run
-        # apps.nxrm_two_portal = flake-utils.lib.mkApp {
-        #   drv = packages.nxrm_two_portal;
-        #   name = "nxrm_two_portal";
-        # };
-        # apps.default = apps.nxrm_two_portal;
+        apps.nxrm_two_portal = flake-utils.lib.mkApp {
+          drv = packages.nxrm_two_portal;
+          name = "nxrm_two_portal";
+        };
+        apps.default = apps.nxrm_two_portal;
 
         devShells.default = pkgs.mkShell {
           inputsFrom = builtins.attrValues self.checks.${system};
@@ -125,7 +130,9 @@
             jdk17
             gnupg
 
-            mvnLocal
+            mvnLocalProxy
+            mvnStagingProxy
+            mvnProductionProxy
           ];
         };
       });
