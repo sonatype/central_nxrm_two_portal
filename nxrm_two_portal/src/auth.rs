@@ -67,6 +67,7 @@ fn token_from_header(auth_header: &str) -> eyre::Result<String> {
             .map(String::from)
             .ok_or_eyre("Improperly formatted Basic auth header");
     } else if auth_header.starts_with(BEARER_PREFIX) {
+        tracing::trace!("Bearer authorization header provided");
         return auth_header
             .strip_prefix(BEARER_PREFIX)
             .map(String::from)

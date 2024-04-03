@@ -98,6 +98,11 @@ pub(crate) async fn staging_deploy_by_repository_id<R: Repository>(
 ) -> Result<impl IntoResponse, ApiError> {
     tracing::debug!("Request to upload file to staging repository");
 
+    if file_path.contains("maven-metadata.xml") {
+        tracing::debug!("Skipping adding of a metadata file to the repository");
+        return Ok(StatusCode::CREATED);
+    }
+
     let repository_key =
         RepositoryKey::from_user_id_and_repository_id(&user_token.token_username, &repository_id)?;
 
@@ -146,7 +151,8 @@ pub(crate) async fn staging_profiles_finish_endpoint<R: Repository>(
     let zip_data = zip_data.as_buffer()?;
 
     let credentials = Credentials::new(user_token.token_username, user_token.token_password);
-    let mut portal_api_client = PortalApiClient::central_client(credentials)?;
+    let mut portal_api_client =
+        PortalApiClient::client("https://staging.portal.central.sonatype.dev", credentials)?;
 
     portal_api_client
         .upload_from_memory("Test", PublishingType::UserManaged, zip_data)
