@@ -1,4 +1,6 @@
+use auth::auth;
 use axum::{
+    middleware,
     routing::{get, post, put},
     Router,
 };
@@ -7,6 +9,7 @@ use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 use repository::local_repository::LocalRepository;
 
+mod auth;
 mod endpoints;
 mod errors;
 mod extract;
@@ -48,7 +51,8 @@ async fn main() -> eyre::Result<()> {
             post(staging_profiles_finish_endpoint),
         )
         .route("/repository/:repository_id", get(staging_repository))
-        .route("/bulk/promote", post(staging_bulk_promote));
+        .route("/bulk/promote", post(staging_bulk_promote))
+        .route_layer(middleware::from_fn(auth));
 
     let app = Router::new()
         .route("/service/local/status", get(status_endpoint))

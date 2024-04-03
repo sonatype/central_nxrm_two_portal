@@ -8,9 +8,11 @@ description = "Translate the subset of the NXRM2 API into the new Central Portal
 async-trait = "0.1.77"
 axum = { version = "0.7.5", features = ["json", "tracing", "macros"] }
 axum-extra = { version = "0.9.2", features = ["typed-header"] }
+base64 = "0.22.0"
 color-eyre = "0.6.3"
 ex_em_ell = "0.2.0"
 eyre = "0.6.12"
+futures = "0.3.30"
 itertools = "0.12.1"
 mime = "0.3.17"
 portal_api = { path = "../portal_api" }

@@ -59,7 +59,7 @@ impl PortalApiClient {
         Ok(Self { client, host })
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self, upload_bundle_contents))]
     pub async fn upload_from_memory(
         &mut self,
         deployment_name: &str,
@@ -68,7 +68,7 @@ impl PortalApiClient {
     ) -> eyre::Result<String> {
         let part = Part::bytes(upload_bundle_contents)
             .file_name("bundle.zip")
-            .mime_str(UPLOAD_ENDPOINT)?;
+            .mime_str(UPLOAD_MIME_STR)?;
 
         let deployment_id = self
             .upload_part(deployment_name, publishing_type, part)
