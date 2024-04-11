@@ -1,6 +1,9 @@
 use base64::engine::general_purpose::STANDARD;
 use base64::engine::Engine;
-use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
+use reqwest::{
+    header::{HeaderValue, AUTHORIZATION},
+    RequestBuilder,
+};
 
 pub struct Credentials {
     username: String,
@@ -12,11 +15,14 @@ impl Credentials {
         Self { username, password }
     }
 
-    pub fn add_credentials_to_headers(&self, headers: &mut HeaderMap) -> eyre::Result<()> {
+    pub fn add_credentials_to_request(
+        &self,
+        request: RequestBuilder,
+    ) -> eyre::Result<RequestBuilder> {
         let token_header = HeaderValue::from_str(&self.as_bearer_token())?;
-        headers.insert(AUTHORIZATION, token_header);
+        let request = request.header(AUTHORIZATION, token_header);
         tracing::trace!("Added {AUTHORIZATION} header");
-        Ok(())
+        Ok(request)
     }
 
     fn as_bearer_token(&self) -> String {
