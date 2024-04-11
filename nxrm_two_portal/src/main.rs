@@ -11,11 +11,13 @@ use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 use repository::local_repository::LocalRepository;
 
 mod auth;
+mod config;
 mod endpoints;
 mod errors;
 mod extract;
 mod state;
 
+use config::AppConfig;
 use endpoints::{
     fallback::fallback,
     staging::{
@@ -34,8 +36,14 @@ async fn main() -> eyre::Result<()> {
         .with(EnvFilter::from_default_env())
         .init();
 
+    let app_config = AppConfig::load()?;
+    tracing::debug!("Loaded configuration: {app_config:?}");
+
     let local_repository = LocalRepository::new()?;
-    let portal_api_client = PortalApiClient::client("https://staging.portal.central.sonatype.dev")?;
+    tracing::debug!("Initialized a local repository");
+
+    let portal_api_client = PortalApiClient::client(&app_config.central_url)?;
+    tracing::debug!("Initialized a Portal API client");
 
     let app_state = AppState::new(local_repository, portal_api_client);
 
@@ -64,7 +72,8 @@ async fn main() -> eyre::Result<()> {
         .with_state(app_state)
         .fallback(fallback);
 
-    let listener = TcpListener::bind("0.0.0.0:2727").await?;
+    tracing::info!("Listening on port: {}", app_config.app_port);
+    let listener = TcpListener::bind(format!("0.0.0.0:{}", app_config.app_port)).await?;
 
     axum::serve(listener, app).await?;
 

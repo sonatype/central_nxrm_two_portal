@@ -155,7 +155,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let mut client = PortalApiClient::client(&mock_server.uri())?;
+        let client = PortalApiClient::client(&mock_server.uri())?;
 
         let deployment_id = client
             .upload_from_file(
@@ -182,7 +182,7 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let mut client = PortalApiClient::client(&mock_server.uri())?;
+        let client = PortalApiClient::client(&mock_server.uri())?;
 
         let error = client
             .upload_from_file(
