@@ -4,6 +4,7 @@ use axum::{
     routing::{get, post, put},
     Router,
 };
+use portal_api::PortalApiClient;
 use tokio::net::TcpListener;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
@@ -33,7 +34,10 @@ async fn main() -> eyre::Result<()> {
         .with(EnvFilter::from_default_env())
         .init();
 
-    let app_state = AppState::new(LocalRepository::new()?);
+    let local_repository = LocalRepository::new()?;
+    let portal_api_client = PortalApiClient::client("https://staging.portal.central.sonatype.dev")?;
+
+    let app_state = AppState::new(local_repository, portal_api_client);
 
     let staging_endpoints = Router::new()
         .route("/profile_evaluate", get(staging_profile_evaluate_endpoint))

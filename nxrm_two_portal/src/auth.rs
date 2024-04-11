@@ -6,12 +6,13 @@ use axum::{
 };
 use base64::prelude::{Engine, BASE64_STANDARD};
 use eyre::{bail, OptionExt};
+use portal_api::Credentials;
 use tracing::instrument;
 
 #[derive(Clone)]
 pub struct UserToken {
     pub token_username: String,
-    pub token_password: String,
+    token_password: String,
 }
 
 impl UserToken {
@@ -28,8 +29,8 @@ impl UserToken {
         })
     }
 
-    pub fn as_token(&self) -> String {
-        BASE64_STANDARD.encode(format!("{}:{}", self.token_username, self.token_password))
+    pub fn as_credentials(self) -> Credentials {
+        Credentials::new(self.token_username, self.token_password)
     }
 }
 

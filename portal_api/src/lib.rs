@@ -33,22 +33,19 @@ impl PortalApiClient {
     /// Publish to Maven Central
     ///
     /// Provide [Credentials] to publish via a generated token.
-    pub fn central_client(credentials: Credentials) -> eyre::Result<Self> {
-        Self::client(CENTRAL_HOST, credentials)
+    pub fn central_client() -> eyre::Result<Self> {
+        Self::client(CENTRAL_HOST)
     }
 
     /// Publish to a compatible server
     ///
-    /// Publish to an arbitrary server that implements the same API as Maven Central. Provide the host URL and generated
-    /// [Credentials].
-    pub fn client(host: &str, credentials: Credentials) -> eyre::Result<Self> {
+    /// Publish to an arbitrary server that implements the same API as Maven Central.
+    pub fn client(host: &str) -> eyre::Result<Self> {
         let mut default_headers = HeaderMap::new();
 
         let user_agent_header =
             HeaderValue::from_str(&format!("portal_api client ({})", env!("CARGO_PKG_NAME")))?;
         default_headers.insert(USER_AGENT, user_agent_header);
-
-        credentials.add_credentials_to_headers(&mut default_headers)?;
 
         let client = ClientBuilder::default()
             .default_headers(default_headers)
@@ -59,9 +56,10 @@ impl PortalApiClient {
         Ok(Self { client, host })
     }
 
-    #[tracing::instrument(skip(self, upload_bundle_contents))]
+    #[tracing::instrument(skip(self, credentials, upload_bundle_contents))]
     pub async fn upload_from_memory(
-        &mut self,
+        &self,
+        credentials: &Credentials,
         deployment_name: &str,
         publishing_type: PublishingType,
         upload_bundle_contents: Vec<u8>,
@@ -71,15 +69,16 @@ impl PortalApiClient {
             .mime_str(UPLOAD_MIME_STR)?;
 
         let deployment_id = self
-            .upload_part(deployment_name, publishing_type, part)
+            .upload_part(credentials, deployment_name, publishing_type, part)
             .await?;
 
         Ok(deployment_id)
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self, credentials))]
     pub async fn upload_from_file(
-        &mut self,
+        &self,
+        credentials: &Credentials,
         deployment_name: &str,
         publishing_type: PublishingType,
         upload_bundle_path: &PathBuf,
@@ -97,15 +96,16 @@ impl PortalApiClient {
             .mime_str(UPLOAD_MIME_STR)?;
 
         let deployment_id = self
-            .upload_part(deployment_name, publishing_type, part)
+            .upload_part(credentials, deployment_name, publishing_type, part)
             .await?;
 
         Ok(deployment_id)
     }
 
-    #[tracing::instrument(skip(self))]
+    #[tracing::instrument(skip(self, credentials, part))]
     async fn upload_part(
-        &mut self,
+        &self,
+        credentials: &Credentials,
         deployment_name: &str,
         publishing_type: PublishingType,
         part: Part,
@@ -116,14 +116,15 @@ impl PortalApiClient {
 
         let bundle = Form::new().part("bundle", part);
 
-        let response = self
+        let request = self
             .client
             .post(url)
             .query(&[("name", deployment_name)])
             .query(&[("publishingType", publishing_type)])
-            .multipart(bundle)
-            .send()
-            .await?;
+            .multipart(bundle);
+        let request = credentials.add_credentials_to_request(request)?;
+
+        let response = request.send().await?;
 
         tracing::trace!("Got response: {:?}", response);
         let deployment_id = if response.status().is_success() {
@@ -154,13 +155,11 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let mut client = PortalApiClient::client(
-            &mock_server.uri(),
-            Credentials::new("test_username".to_string(), "test_password".to_string()),
-        )?;
+        let mut client = PortalApiClient::client(&mock_server.uri())?;
 
         let deployment_id = client
             .upload_from_file(
+                &Credentials::new("test_username".to_string(), "test_password".to_string()),
                 "test_deployment",
                 PublishingType::Automatic,
                 &PathBuf::from("Cargo.toml"), // Don't bother with client side validation of the bundle
@@ -183,13 +182,11 @@ mod tests {
             .mount(&mock_server)
             .await;
 
-        let mut client = PortalApiClient::client(
-            &mock_server.uri(),
-            Credentials::new("test_username".to_string(), "test_password".to_string()),
-        )?;
+        let mut client = PortalApiClient::client(&mock_server.uri())?;
 
         let error = client
             .upload_from_file(
+                &Credentials::new("test_username".to_string(), "test_password".to_string()),
                 "test_deployment",
                 PublishingType::Automatic,
                 &PathBuf::from("Cargo.toml"), // Don't bother with client side validation of the bundle

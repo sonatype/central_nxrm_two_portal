@@ -7,7 +7,6 @@ use axum_extra::TypedHeader;
 use futures::stream::TryStreamExt;
 use itertools::Itertools;
 use portal_api::api_types::PublishingType;
-use portal_api::{Credentials, PortalApiClient};
 use repository::traits::{Repository, RepositoryKey};
 use serde::Deserialize;
 use tracing::instrument;
@@ -150,12 +149,19 @@ pub(crate) async fn staging_profiles_finish_endpoint<R: Repository>(
     let zip_data = app_state.repository.finish(&repository_key).await?;
     let zip_data = zip_data.as_buffer()?;
 
-    let credentials = Credentials::new(user_token.token_username, user_token.token_password);
-    let mut portal_api_client =
-        PortalApiClient::client("https://staging.portal.central.sonatype.dev", credentials)?;
+    let credentials = user_token.as_credentials();
 
-    portal_api_client
-        .upload_from_memory("Test", PublishingType::UserManaged, zip_data)
+    app_state
+        .portal_api_client
+        .upload_from_memory(
+            &credentials,
+            &format!(
+                "{} (via OSSRH API Proxy)",
+                repository_key.get_repository_id()
+            ),
+            PublishingType::Automatic,
+            zip_data,
+        )
         .await?;
 
     Ok(StatusCode::OK)
