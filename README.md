@@ -49,7 +49,7 @@ nix flake check
 ### Run The Local Proxy
 
 ``` shell
-RUST_LOG=debug,h2=info,hyper=info,rusttls=info nix run
+just run-local
 ```
 
 Note: This reduces some of the noise around HTTPS requests to the Portal

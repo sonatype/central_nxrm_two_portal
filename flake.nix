@@ -119,6 +119,9 @@
             cargo-msrv
             cargo-outdated
 
+            # Orchestration
+            just
+
             # GitHub tooling
             gh
 

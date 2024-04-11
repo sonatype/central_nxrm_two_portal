@@ -46,7 +46,7 @@ pub async fn main() -> eyre::Result<()> {
 
     let credentials = Credentials::new(username, password);
 
-    let mut api_client = PortalApiClient::client(&host)?;
+    let api_client = PortalApiClient::client(&host)?;
 
     let deployment_name = cli.deployment_name.unwrap_or("Upload".to_string());
 
