@@ -1427,6 +1427,7 @@ dependencies = [
  "portal_api",
  "repository",
  "serde",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",
