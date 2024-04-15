@@ -22,8 +22,9 @@ use endpoints::{
     fallback::fallback,
     staging::{
         staging_bulk_promote, staging_deploy_by_repository_id, staging_deploy_by_repository_id_get,
-        staging_profile_evaluate_endpoint, staging_profiles_endpoint,
-        staging_profiles_finish_endpoint, staging_profiles_start_endpoint, staging_repository,
+        staging_deploy_maven2, staging_deploy_maven2_get, staging_profile_evaluate_endpoint,
+        staging_profiles_endpoint, staging_profiles_finish_endpoint,
+        staging_profiles_start_endpoint, staging_repository,
     },
     status::status_endpoint,
 };
@@ -64,6 +65,11 @@ async fn main() -> eyre::Result<()> {
         )
         .route("/repository/:repository_id", get(staging_repository))
         .route("/bulk/promote", post(staging_bulk_promote))
+        // required for Gradle maven-publish plugin
+        .route(
+            "/deploy/maven2/*file_path",
+            put(staging_deploy_maven2).get(staging_deploy_maven2_get),
+        )
         .route_layer(middleware::from_fn(auth));
 
     let app = Router::new()

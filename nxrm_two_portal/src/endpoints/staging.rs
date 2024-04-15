@@ -16,7 +16,7 @@ use crate::errors::ApiError;
 use crate::extract::{respond_to_accepts_header, XmlOrJson};
 use crate::state::AppState;
 
-#[instrument]
+#[instrument(skip(headers))]
 pub(crate) async fn staging_profile_evaluate_endpoint(
     Host(host): Host,
     TypedHeader(_user_agent): TypedHeader<UserAgent>,
@@ -44,7 +44,7 @@ pub(crate) struct StagingProfileEvaluateQueryParams {
     group: String,
 }
 
-#[instrument]
+#[instrument(skip(headers))]
 pub(crate) async fn staging_profiles_endpoint(
     Host(host): Host,
     TypedHeader(_user_agent): TypedHeader<UserAgent>,
@@ -57,7 +57,7 @@ pub(crate) async fn staging_profiles_endpoint(
     Ok(respond_to_accepts_header(&headers, staging_profiles))
 }
 
-#[instrument(skip(app_state, user_token, staging_profiles_start_request))]
+#[instrument(skip(headers, app_state, user_token, staging_profiles_start_request))]
 pub(crate) async fn staging_profiles_start_endpoint<R: Repository>(
     Host(host): Host,
     TypedHeader(_user_agent): TypedHeader<UserAgent>,
@@ -192,7 +192,7 @@ pub(crate) struct StagingProfilesFinishRequestData {
     description: String,
 }
 
-#[instrument]
+#[instrument(skip(headers))]
 pub(crate) async fn staging_repository(
     Host(host): Host,
     TypedHeader(_user_agent): TypedHeader<UserAgent>,
@@ -237,6 +237,31 @@ pub(crate) struct StagingBulkPromoteRequestData {
     staged_repository_ids: Vec<WrappedString>,
     description: String,
     auto_drop_after_release: bool,
+}
+
+#[instrument(skip(app_state, user_token, request))]
+pub(crate) async fn staging_deploy_maven2<R: Repository>(
+    TypedHeader(_user_agent): TypedHeader<UserAgent>,
+    Path(file_path): Path<String>,
+    State(app_state): State<AppState<R>>,
+    Extension(user_token): Extension<UserToken>,
+    request: Request,
+) -> Result<impl IntoResponse, ApiError> {
+    tracing::debug!("Request to upload file to staging repository");
+
+    Ok(StatusCode::CREATED)
+}
+
+#[instrument(skip(app_state, user_token))]
+pub(crate) async fn staging_deploy_maven2_get<R: Repository>(
+    TypedHeader(_user_agent): TypedHeader<UserAgent>,
+    Path(file_path): Path<String>,
+    State(app_state): State<AppState<R>>,
+    Extension(user_token): Extension<UserToken>,
+) -> Result<impl IntoResponse, ApiError> {
+    tracing::debug!("Request to get a file from a staging repository");
+
+    Ok(StatusCode::NOT_FOUND)
 }
 
 #[derive(Debug, Serialize, ex_em_ell::ToXmlDocument)]

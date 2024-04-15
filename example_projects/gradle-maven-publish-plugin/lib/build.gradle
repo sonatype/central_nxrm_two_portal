@@ -1,0 +1,90 @@
+plugins {
+    id 'java-library'
+    id 'maven-publish'
+    id 'signing'
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    testImplementation libs.junit
+
+}
+
+group = 'io.github.amy-keibler'
+version = '0.1.0'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+    withJavadocJar()
+    withSourcesJar()
+}
+
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+            artifactId = 'example-gradle-maven-publish-plugin'
+            from components.java
+            versionMapping {
+                usage('java-api') {
+                    fromResolutionOf('runtimeClasspath')
+                }
+                usage('java-runtime') {
+                    fromResolutionResult()
+                }
+            }
+            pom {
+                name = 'example-gradle-maven-publish-plugin'
+                description = 'An example library that demonstrates the usage of the Gradle maven-publish plugin'
+                url = 'https://github.com/amy-keibler/nxrm_two_portal'
+                licenses {
+                    license {
+                        name = 'The Apache License, Version 2.0'
+                        url = 'https://www.apache.org/licenses/LICENSE-2.0.tx'
+                    }
+                    license {
+                        name = 'MIT License'
+                        url = 'https://www.opensource.org/licenses/mit-license.php'
+                    }
+                }
+                developers {
+                    developer {
+                        id = 'amy'
+                        name = 'Amy Keibler'
+                        email = 'akeibler@sonatype.com'
+                        organization = 'Sonatype'
+                        organizationUrl = 'https://www.sonatype.com'
+                    }
+                }
+                scm {
+                    connection = 'scm:git:git://github.com/amy-keibler/nxrm_two_portal.git'
+                    developerConnection = 'scm:git:ssh://github.com:amy-keibler/nxrm_two_portal.git'
+                    url = 'https://github.com/amy-keibler/nxrm_two_portal/tree/main'
+                }
+            }
+        }
+    }
+    repositories {
+        maven {
+            name = 'centralProxy'
+            url = 'http://localhost:2727/service/local/staging/deploy/maven2/'
+            allowInsecureProtocol = true
+            credentials(PasswordCredentials)
+        }
+    }
+}
+
+signing {
+    useGpgCmd()
+    sign publishing.publications.mavenJava
+}
+
+javadoc {
+    if(JavaVersion.current().isJava9Compatible()) {
+        options.addBooleanOption('html5', true)
+    }
+}

@@ -83,6 +83,38 @@
           name = "mvnProductionProxy";
           settingsFile = "settings-production.xml";
         };
+
+        mkGradle = { name, credentialsFile }: pkgs.writeShellApplication {
+          inherit name;
+
+          runtimeInputs = with pkgs; [ gradle ];
+
+          text = ''
+            #!/usr/bin/env bash
+            git_root=$(git rev-parse --show-toplevel)
+            # shellcheck disable=SC1091
+            source "$git_root/${credentialsFile}"
+            gradle \
+              -PcentralProxyUsername="$USERNAME" \
+              -PcentralProxyPassword="$PASSWORD" \
+              "$@";
+          '';
+        };
+
+        gradleLocalProxy = mkGradle {
+          name = "gradleLocalProxy";
+          credentialsFile = "credentials-local";
+        };
+
+        gradleStagingProxy = mkGradle {
+          name = "gradleStagingProxy";
+          credentialsFile = "credentials-staging";
+        };
+
+        gradleProductionProxy = mkGradle {
+          name = "gradleProductionProxy";
+          credentialsFile = "credentials-production";
+        };
       in
       rec {
         checks = {
@@ -130,12 +162,16 @@
 
             # Java tooling
             maven
+            gradle
             jdk17
             gnupg
 
             mvnLocalProxy
             mvnStagingProxy
             mvnProductionProxy
+            gradleLocalProxy
+            gradleStagingProxy
+            gradleProductionProxy
           ];
         };
       });
