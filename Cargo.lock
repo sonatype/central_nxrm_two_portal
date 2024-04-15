@@ -771,9 +771,9 @@ dependencies = [
 
 [[package]]
 name = "ex_em_ell"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "445ef7c6a1e420035c73960778384d048bc9e76ff60ff4858ac82d786e098c18"
+checksum = "7ef74b56a3862f873596c1567267f03a333f546a7132ed5ae72dbdc27284f642"
 dependencies = [
  "ex_em_ell_derive",
  "itertools",
@@ -783,9 +783,9 @@ dependencies = [
 
 [[package]]
 name = "ex_em_ell_derive"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5f2709e1bb182550576b6414171200289cffa1f78fc0f5ce4e64dbfd9e206d1b"
+checksum = "3fa537c232ce0c6cd40e3fe23daabae6e1dbd9fbc1ba96c90d05a46e263d9809"
 dependencies = [
  "darling",
  "heck 0.4.1",
