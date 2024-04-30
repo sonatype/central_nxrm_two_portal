@@ -1,3 +1,5 @@
+use std::net::SocketAddr;
+
 use auth::auth;
 use axum::{
     middleware,
@@ -81,7 +83,11 @@ async fn main() -> eyre::Result<()> {
     tracing::info!("Listening on port: {}", app_config.app_port);
     let listener = TcpListener::bind(format!("0.0.0.0:{}", app_config.app_port)).await?;
 
-    axum::serve(listener, app).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
 
     Ok(())
 }

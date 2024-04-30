@@ -1,4 +1,6 @@
-use axum::extract::{Host, Path, Query, Request, State};
+use std::net::SocketAddr;
+
+use axum::extract::{ConnectInfo, Host, Path, Query, Request, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::Extension;
@@ -60,6 +62,7 @@ pub(crate) async fn staging_profiles_endpoint(
 #[instrument(skip(headers, app_state, user_token, staging_profiles_start_request))]
 pub(crate) async fn staging_profiles_start_endpoint<R: Repository>(
     Host(host): Host,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     TypedHeader(_user_agent): TypedHeader<UserAgent>,
     headers: HeaderMap,
     Path(profile_id): Path<String>,
@@ -71,7 +74,7 @@ pub(crate) async fn staging_profiles_start_endpoint<R: Repository>(
 
     let repository = app_state
         .repository
-        .start(&user_token.token_username, &profile_id)
+        .start(&user_token.token_username, &addr.ip(), &profile_id)
         .await?;
 
     let staging_profiles_start_response = StagingProfilesPromoteResponse::new(
@@ -101,6 +104,7 @@ pub(crate) struct StagingProfilesStartRequestData {
 #[instrument(skip(app_state, user_token, request))]
 pub(crate) async fn staging_deploy_by_repository_id<R: Repository>(
     TypedHeader(_user_agent): TypedHeader<UserAgent>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Path((repository_id, file_path)): Path<(String, String)>,
     State(app_state): State<AppState<R>>,
     Extension(user_token): Extension<UserToken>,
@@ -113,8 +117,11 @@ pub(crate) async fn staging_deploy_by_repository_id<R: Repository>(
         return Ok(StatusCode::CREATED);
     }
 
-    let repository_key =
-        RepositoryKey::from_user_id_and_repository_id(&user_token.token_username, &repository_id)?;
+    let repository_key = RepositoryKey::from_user_context_and_repository_id(
+        &user_token.token_username,
+        &addr.ip(),
+        &repository_id,
+    )?;
 
     app_state
         .repository
@@ -144,6 +151,7 @@ pub(crate) async fn staging_deploy_by_repository_id_get(
 #[instrument(skip(app_state, user_token, staging_profiles_finish_request))]
 pub(crate) async fn staging_profiles_finish_endpoint<R: Repository>(
     Host(host): Host,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     TypedHeader(_user_agent): TypedHeader<UserAgent>,
     Path(profile_id): Path<String>,
     State(app_state): State<AppState<R>>,
@@ -152,8 +160,9 @@ pub(crate) async fn staging_profiles_finish_endpoint<R: Repository>(
 ) -> Result<StatusCode, ApiError> {
     tracing::debug!("Request to finish profile");
 
-    let repository_key = RepositoryKey::from_user_id_and_repository_id(
+    let repository_key = RepositoryKey::from_user_context_and_repository_id(
         &user_token.token_username,
+        &addr.ip(),
         &staging_profiles_finish_request.data.staged_repository_id,
     )?;
 
@@ -242,6 +251,7 @@ pub(crate) struct StagingBulkPromoteRequestData {
 #[instrument(skip(app_state, user_token, request))]
 pub(crate) async fn staging_deploy_maven2<R: Repository>(
     TypedHeader(_user_agent): TypedHeader<UserAgent>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Path(file_path): Path<String>,
     State(app_state): State<AppState<R>>,
     Extension(user_token): Extension<UserToken>,
@@ -249,15 +259,32 @@ pub(crate) async fn staging_deploy_maven2<R: Repository>(
 ) -> Result<impl IntoResponse, ApiError> {
     tracing::debug!("Request to upload file to staging repository");
 
+    let repository_key = app_state
+        .repository
+        .open_no_profile_repository(&user_token.token_username, &addr.ip())
+        .await?;
+
+    app_state
+        .repository
+        .add_file(
+            &repository_key,
+            file_path,
+            request
+                .into_body()
+                .into_data_stream()
+                .map_err(|e| eyre::eyre!("Issue with the request body: {e}")),
+        )
+        .await?;
+
     Ok(StatusCode::CREATED)
 }
 
-#[instrument(skip(app_state, user_token))]
+#[instrument(skip(_app_state, _user_token))]
 pub(crate) async fn staging_deploy_maven2_get<R: Repository>(
     TypedHeader(_user_agent): TypedHeader<UserAgent>,
     Path(file_path): Path<String>,
-    State(app_state): State<AppState<R>>,
-    Extension(user_token): Extension<UserToken>,
+    State(_app_state): State<AppState<R>>,
+    Extension(_user_token): Extension<UserToken>,
 ) -> Result<impl IntoResponse, ApiError> {
     tracing::debug!("Request to get a file from a staging repository");
 

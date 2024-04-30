@@ -1,8 +1,16 @@
-use axum::{extract::Request, http::StatusCode};
+use std::net::SocketAddr;
+
+use axum::{
+    extract::{ConnectInfo, Request},
+    http::StatusCode,
+};
 use tracing::instrument;
 
 #[instrument(skip(request))]
-pub(crate) async fn fallback(request: Request) -> (StatusCode, String) {
+pub(crate) async fn fallback(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    request: Request,
+) -> (StatusCode, String) {
     tracing::error!("Request to {}: {}", request.method(), request.uri());
     tracing::trace!("Headers: {:#?}", request.headers());
     tracing::trace!("Authority: {:#?}", request.uri().authority());
