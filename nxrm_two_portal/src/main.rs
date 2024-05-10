@@ -17,11 +17,13 @@ mod config;
 mod endpoints;
 mod errors;
 mod extract;
+mod publish;
 mod state;
 
 use config::AppConfig;
 use endpoints::{
     fallback::fallback,
+    manual::manual_upload_default_repository,
     staging::{
         staging_bulk_promote, staging_deploy_by_repository_id, staging_deploy_by_repository_id_get,
         staging_deploy_maven2, staging_deploy_maven2_get, staging_profile_evaluate_endpoint,
@@ -77,6 +79,7 @@ async fn main() -> eyre::Result<()> {
     let app = Router::new()
         .route("/service/local/status", get(status_endpoint))
         .nest("/service/local/staging", staging_endpoints)
+        .route("/manual/upload", post(manual_upload_default_repository))
         .with_state(app_state)
         .fallback(fallback);
 

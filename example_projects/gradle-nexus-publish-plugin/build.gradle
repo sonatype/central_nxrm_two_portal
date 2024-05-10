@@ -1,0 +1,14 @@
+plugins {
+    id 'io.github.gradle-nexus.publish-plugin' version '2.0.0'
+}
+
+nexusPublishing {
+    repositories {
+        sonatype {
+            nexusUrl = uri('http://localhost:2727/service/local/')
+            snapshotRepositoryUrl = uri('http://localhost:2727/content/repositories/snapshots/')
+            username = findProperty('centralProxyUsername')
+            password = findProperty('centralProxyPassword')
+        }
+    }
+}

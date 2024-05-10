@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::ops::Deref;
 
 use axum::extract::{ConnectInfo, Host, Path, Query, Request, State};
 use axum::http::{HeaderMap, StatusCode};
@@ -16,6 +17,7 @@ use tracing::instrument;
 use crate::auth::UserToken;
 use crate::errors::ApiError;
 use crate::extract::{respond_to_accepts_header, XmlOrJson};
+use crate::publish::publish;
 use crate::state::AppState;
 
 #[instrument(skip(headers))]
@@ -166,23 +168,14 @@ pub(crate) async fn staging_profiles_finish_endpoint<R: Repository>(
         &staging_profiles_finish_request.data.staged_repository_id,
     )?;
 
-    let zip_data = app_state.repository.finish(&repository_key).await?;
-    let zip_data = zip_data.as_buffer()?;
-
-    let credentials = user_token.as_credentials();
-
-    app_state
-        .portal_api_client
-        .upload_from_memory(
-            &credentials,
-            &format!(
-                "{} (via OSSRH API Proxy)",
-                repository_key.get_repository_id()
-            ),
-            PublishingType::Automatic,
-            zip_data,
-        )
-        .await?;
+    publish(
+        &app_state.portal_api_client,
+        app_state.repository.deref(),
+        user_token,
+        &repository_key,
+        PublishingType::Automatic,
+    )
+    .await?;
 
     Ok(StatusCode::OK)
 }

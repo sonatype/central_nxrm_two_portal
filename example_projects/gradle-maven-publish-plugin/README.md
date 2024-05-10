@@ -1,6 +1,5 @@
 # Gradle's built-in `maven-publish` plugin
 
-
 - [Public
   Documentation](https://docs.gradle.org/current/userguide/publishing_maven.html)
 - [Source
