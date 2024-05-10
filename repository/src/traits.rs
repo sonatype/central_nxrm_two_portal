@@ -8,7 +8,7 @@ use std::{
     path::Path,
 };
 use tokio::{fs::File, io::AsyncReadExt};
-use zip::{write::FileOptions, ZipWriter};
+use zip::{write::SimpleFileOptions, ZipWriter};
 
 /// A trait to define the actions of NXRM2 staging repositories
 ///
@@ -99,7 +99,7 @@ impl ZipFile {
         let relative_path = relative_path.as_ref().display().to_string();
         tracing::trace!("Adding file to .zip: {relative_path}");
         self.writer
-            .start_file(&relative_path, FileOptions::default())?;
+            .start_file(relative_path, SimpleFileOptions::default())?;
         let mut contents = Vec::new();
         file.read_to_end(&mut contents)
             .await
@@ -111,7 +111,7 @@ impl ZipFile {
         Ok(())
     }
 
-    pub fn as_buffer(mut self) -> eyre::Result<Vec<u8>> {
+    pub fn as_buffer(self) -> eyre::Result<Vec<u8>> {
         let cursor = self.writer.finish().wrap_err("Failed to write zip file")?;
 
         Ok(cursor.into_inner())
