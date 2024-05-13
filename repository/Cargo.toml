@@ -18,7 +18,7 @@ temp-dir = "0.1.13"
 tokio = { version = "1.37.0", features = ["fs", "tracing"] }
 tokio-util = { version = "0.7.10", features = ["io"] }
 tracing = "0.1.40"
-zip = { version = "1.2.2", default-features = false, features = ["deflate", "deflate-zopfli", "bzip2", "time", "zstd"] }
+zip = { version = "1.2.3", default-features = false, features = ["deflate", "deflate-zopfli", "bzip2", "time", "zstd"] }
 
 [dev-dependencies]
 tokio = { version = "1.37.0", features = ["macros", "rt-multi-thread"] }
