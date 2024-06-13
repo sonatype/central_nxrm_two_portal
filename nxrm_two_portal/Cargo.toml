@@ -14,7 +14,7 @@ config = "0.14.0"
 ex_em_ell = "0.3.0"
 eyre = "0.6.12"
 futures = "0.3.30"
-itertools = "0.12.1"
+itertools = "0.13.0"
 mime = "0.3.17"
 portal_api = { path = "../portal_api" }
 repository = { path = "../repository" }
