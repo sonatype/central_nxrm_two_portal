@@ -18,7 +18,7 @@ itertools = "0.12.1"
 mime = "0.3.17"
 portal_api = { path = "../portal_api" }
 repository = { path = "../repository" }
-serde = { version = "1.0.201", features = ["derive"] }
+serde = { version = "1.0.203", features = ["derive"] }
 tokio = { version = "1.37.0", features = ["macros", "fs", "rt-multi-thread", "tracing"] }
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter", "fmt"] }
