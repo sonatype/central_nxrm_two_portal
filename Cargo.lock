@@ -767,7 +767,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ef74b56a3862f873596c1567267f03a333f546a7132ed5ae72dbdc27284f642"
 dependencies = [
  "ex_em_ell_derive",
- "itertools",
+ "itertools 0.12.1",
  "thiserror",
  "xml-rs",
 ]
@@ -780,7 +780,7 @@ checksum = "3fa537c232ce0c6cd40e3fe23daabae6e1dbd9fbc1ba96c90d05a46e263d9809"
 dependencies = [
  "darling",
  "heck 0.4.1",
- "itertools",
+ "itertools 0.12.1",
  "proc-macro-error",
  "proc-macro2",
  "quote",
@@ -1195,6 +1195,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "itertools"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1413,7 +1422,7 @@ dependencies = [
  "ex_em_ell",
  "eyre",
  "futures",
- "itertools",
+ "itertools 0.13.0",
  "mime",
  "portal_api",
  "repository",
