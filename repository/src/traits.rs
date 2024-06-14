@@ -50,6 +50,10 @@ pub trait Repository {
         S: Stream<Item = eyre::Result<Bytes>> + Send;
 
     async fn finish(&self, repository_key: &RepositoryKey) -> eyre::Result<ZipFile>;
+
+    async fn release(&self, repository_key: &RepositoryKey) -> eyre::Result<()>;
+
+    async fn get_state(&self, repository_key: &RepositoryKey) -> eyre::Result<RepositoryState>;
 }
 
 #[derive(Debug, PartialEq)]
@@ -117,6 +121,39 @@ impl Display for RepositoryKey {
             self.get_profile_id(),
             self.repository_index
         )
+    }
+}
+
+pub enum RepositoryState {
+    Open,
+    Closed,
+    Released,
+    NotFound,
+}
+
+impl Display for RepositoryState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let state_display = match self {
+            RepositoryState::Open => "open",
+            RepositoryState::Closed => "closed",
+            RepositoryState::Released => "released",
+            RepositoryState::NotFound => "not_found",
+        };
+        write!(f, "{state_display}")
+    }
+}
+
+impl TryFrom<&str> for RepositoryState {
+    type Error = String;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value.to_lowercase().as_str() {
+            "open" => Ok(RepositoryState::Open),
+            "closed" => Ok(RepositoryState::Closed),
+            "released" => Ok(RepositoryState::Released),
+            "not_found" => Ok(RepositoryState::NotFound),
+            other => Err(format!("Could not convert {other} into a RepositoryState")),
+        }
     }
 }
 

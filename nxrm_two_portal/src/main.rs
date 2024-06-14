@@ -25,9 +25,10 @@ use endpoints::{
     fallback::fallback,
     manual::manual_upload_default_repository,
     staging::{
-        staging_bulk_promote, staging_deploy_by_repository_id, staging_deploy_by_repository_id_get,
-        staging_deploy_maven2, staging_deploy_maven2_get, staging_profile_evaluate_endpoint,
-        staging_profiles_endpoint, staging_profiles_finish_endpoint,
+        staging_bulk_close, staging_bulk_promote, staging_deploy_by_repository_id,
+        staging_deploy_by_repository_id_get, staging_deploy_maven2, staging_deploy_maven2_get,
+        staging_profile_evaluate_endpoint, staging_profiles_endpoint,
+        staging_profiles_finish_endpoint, staging_profiles_list_endpoint,
         staging_profiles_start_endpoint, staging_repository,
     },
     status::status_endpoint,
@@ -54,6 +55,7 @@ async fn main() -> eyre::Result<()> {
 
     let staging_endpoints = Router::new()
         .route("/profile_evaluate", get(staging_profile_evaluate_endpoint))
+        .route("/profiles", get(staging_profiles_list_endpoint))
         .route("/profiles/:profile_id", get(staging_profiles_endpoint))
         .route(
             "/profiles/:profile_id/start",
@@ -68,6 +70,7 @@ async fn main() -> eyre::Result<()> {
             post(staging_profiles_finish_endpoint),
         )
         .route("/repository/:repository_id", get(staging_repository))
+        .route("/bulk/close", post(staging_bulk_close))
         .route("/bulk/promote", post(staging_bulk_promote))
         // required for Gradle maven-publish plugin
         .route(
@@ -76,10 +79,14 @@ async fn main() -> eyre::Result<()> {
         )
         .route_layer(middleware::from_fn(auth));
 
+    let manual_endpoints = Router::new()
+        .route("/upload", post(manual_upload_default_repository))
+        .route_layer(middleware::from_fn(auth));
+
     let app = Router::new()
         .route("/service/local/status", get(status_endpoint))
         .nest("/service/local/staging", staging_endpoints)
-        .route("/manual/upload", post(manual_upload_default_repository))
+        .nest("/manual", manual_endpoints)
         .with_state(app_state)
         .fallback(fallback);
 

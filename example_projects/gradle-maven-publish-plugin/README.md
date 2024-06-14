@@ -8,6 +8,7 @@
 ## Relevant Configurations
 
 - Gradle version: 8.5
+- Run command: `gradle publish` and then curl the manual endpoint
 
 ## Lessons Learned
 

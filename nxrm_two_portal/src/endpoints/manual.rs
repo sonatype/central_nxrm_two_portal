@@ -32,10 +32,12 @@ pub(crate) async fn manual_upload_default_repository<R: Repository>(
         .open_no_profile_repository(&user_token.token_username, &addr.ip())
         .await?;
 
+    let credentials = user_token.as_credentials();
+
     publish(
         &app_state.portal_api_client,
         app_state.repository.deref(),
-        user_token,
+        &credentials,
         &repository_key,
         params.get_publishing_type(),
     )

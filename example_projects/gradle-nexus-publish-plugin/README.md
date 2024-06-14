@@ -7,6 +7,7 @@
 
 - Gradle version: 8.5
 - Plugin version: 2.0.0
+- Run command: `gradle publishToSonatype closeAndReleaseSonatypeStagingRepository`
 
 ## Plugin Requests
 
@@ -27,42 +28,28 @@ This appears to be an approach to getting all of the profiles that a user has
 access to, and then filtering based on the profile name being a prefix of the
 package group.
 
-``` json
-{
-  "data": [
-    {
-      "resourceURI": "https://s01.oss.sonatype.org/service/local/staging/profiles/42704302172924",
-      "id": "42704302172924",
-      "name": "com.sonatype.central.testing.internal",
-      "repositoryTemplateId": "default_hosted_release",
-      "repositoryType": "maven2",
-      "repositoryTargetId": "4270416802e184",
-      "inProgress": false,
-      "order": 18148,
-      "deployURI": "https://s01.oss.sonatype.org/service/local/staging/deploy/maven2",
-      "targetGroups": [
-        "staging"
-      ],
-      "finishNotifyRoles": [
-        "com.sonatype.central.testing.internal-deployer"
-      ],
-      "promotionNotifyRoles": [],
-      "dropNotifyRoles": [],
-      "closeRuleSets": [
-        "99c4c121590a"
-      ],
-      "promoteRuleSets": [],
-      "promotionTargetRepository": "releases",
-      "mode": "BOTH",
-      "finishNotifyCreator": true,
-      "promotionNotifyCreator": true,
-      "dropNotifyCreator": true,
-      "autoStagingDisabled": false,
-      "repositoriesSearchable": false,
-      "properties": {
-        "@class": "linked-hash-map"
-      }
-    }
-  ]
-}
-```
+### `POST /service/local/staging/profiles/<profileId>/start`
+
+Same as documented in [the `nexus-staging-maven-plugin`
+README](../nexus-staging-maven-plugin/README.md) (but JSON).
+
+### `PUT /service/local/staging/deployByRepositoryId/<filePath>`
+
+Same as documented in [the `nexus-staging-maven-plugin`
+README](../nexus-staging-maven-plugin/README.md).
+
+### `POST /service/local/staging/bulk/close`
+
+### `GET /service/local/staging/repository/<repositoryId>` (Get close status)
+
+Expects a response with a `type` of `closed` ([Calling
+Code](https://github.com/gradle-nexus/publish-plugin/blob/bdb9be94aa411e1b62b153cf4d1b316e36ea5f77/src/main/kotlin/io/github/gradlenexus/publishplugin/internal/StagingRepositoryTransitioner.kt#L30)).
+
+### `POST /service/local/staging/bulk/promote`
+
+Same as documented in [the `nexus-staging-maven-plugin`
+README](../nexus-staging-maven-plugin/README.md) (but JSON).
+
+### `GET /service/local/staging/repository/<repositoryId>` (Get promote status)
+
+Expects a response with a `type` of `released` or `not_found` ([Calling Code](https://github.com/gradle-nexus/publish-plugin/blob/bdb9be94aa411e1b62b153cf4d1b316e36ea5f77/src/main/kotlin/io/github/gradlenexus/publishplugin/internal/StagingRepositoryTransitioner.kt#L34)).
