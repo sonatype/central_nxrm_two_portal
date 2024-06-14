@@ -9,7 +9,7 @@ base64 = "0.22.1"
 eyre = "0.6.12"
 reqwest = { version = "0.12.4", default-features = false, features = ["json", "multipart", "rustls-tls", "stream"] }
 serde = { version = "1.0.203", features = ["derive"] }
-tokio = { version = "1.37.0", features = ["fs", "tracing"] }
+tokio = { version = "1.38.0", features = ["fs", "tracing"] }
 tokio-util = { version = "0.7.11", features = ["codec"] }
 tracing = "0.1.40"
 url = "2.5.0"
@@ -19,6 +19,6 @@ clap = { version = "4.5.4", features = ["derive"] }
 promptly = "0.3.1"
 rpassword = "7.3.1"
 serde_json = "1.0.117"
-tokio = { version = "1.37.0", features = ["macros", "rt-multi-thread"] }
+tokio = { version = "1.38.0", features = ["macros", "rt-multi-thread"] }
 tracing-subscriber = { version = "0.3.18", features = ["env-filter", "fmt"] }
 wiremock = "0.6.0"
