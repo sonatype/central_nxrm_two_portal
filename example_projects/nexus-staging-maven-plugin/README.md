@@ -8,6 +8,7 @@
 - `version`: 1.6.13
 - `autoReleaseAfterClose`: without this set to `true`, publishing requires
   logging in to the NXRM2 instance to manually propagate a build to Central
+- Run command: `mvn deploy -Prelease`
 
 ## Plugin Requests
 

@@ -1,31 +1,39 @@
-use axum::extract::{Host, Path, Query, Request, State};
-use axum::http::StatusCode;
-use axum::response::IntoResponse;
+use std::net::SocketAddr;
+use std::ops::Deref;
+
+use axum::extract::{ConnectInfo, Host, Path, Query, Request, State};
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
 use axum::Extension;
 use axum_extra::headers::UserAgent;
 use axum_extra::TypedHeader;
 use futures::stream::TryStreamExt;
 use itertools::Itertools;
 use portal_api::api_types::PublishingType;
-use repository::traits::{Repository, RepositoryKey};
-use serde::Deserialize;
+use repository::traits::{Repository, RepositoryKey, RepositoryState};
+use serde::{ser::SerializeMap, Deserialize, Serialize};
 use tracing::instrument;
 
 use crate::auth::UserToken;
 use crate::errors::ApiError;
-use crate::extract::Xml;
+use crate::extract::{respond_to_accepts_header, XmlOrJson};
+use crate::publish::publish;
 use crate::state::AppState;
 
-#[instrument]
+#[instrument(skip(headers))]
 pub(crate) async fn staging_profile_evaluate_endpoint(
     Host(host): Host,
     TypedHeader(_user_agent): TypedHeader<UserAgent>,
+    headers: HeaderMap,
     Query(query): Query<StagingProfileEvaluateQueryParams>,
-) -> Result<Xml<StagingProfilesEvaluateResponse>, ApiError> {
+) -> Result<Response, ApiError> {
     tracing::debug!("Request to match staging profiles");
     let staging_profile_evaluate = StagingProfilesEvaluateResponse::new(host, query.group);
 
-    Ok(Xml(staging_profile_evaluate))
+    Ok(respond_to_accepts_header(
+        &headers,
+        staging_profile_evaluate,
+    ))
 }
 
 #[derive(Debug, Deserialize)]
@@ -40,32 +48,48 @@ pub(crate) struct StagingProfileEvaluateQueryParams {
     group: String,
 }
 
-#[instrument]
+#[instrument(skip(headers))]
+pub(crate) async fn staging_profiles_list_endpoint(
+    Host(host): Host,
+    TypedHeader(_user_agent): TypedHeader<UserAgent>,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    tracing::debug!("Request to get staging profile");
+    let staging_profiles =
+        StagingProfilesEvaluateResponse::new(host, "io.github.amy-keibler".to_string()); // TODO: this is hardcoded
+
+    Ok(respond_to_accepts_header(&headers, staging_profiles))
+}
+
+#[instrument(skip(headers))]
 pub(crate) async fn staging_profiles_endpoint(
     Host(host): Host,
     TypedHeader(_user_agent): TypedHeader<UserAgent>,
+    headers: HeaderMap,
     Path(profile_id): Path<String>,
-) -> Result<Xml<StagingProfilesResponse>, ApiError> {
+) -> Result<Response, ApiError> {
     tracing::debug!("Request to get staging profile");
     let staging_profiles = StagingProfilesResponse::new(host, profile_id);
 
-    Ok(Xml(staging_profiles))
+    Ok(respond_to_accepts_header(&headers, staging_profiles))
 }
 
-#[instrument(skip(app_state, user_token, staging_profiles_start_request))]
+#[instrument(skip(headers, app_state, user_token, staging_profiles_start_request))]
 pub(crate) async fn staging_profiles_start_endpoint<R: Repository>(
     Host(host): Host,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     TypedHeader(_user_agent): TypedHeader<UserAgent>,
+    headers: HeaderMap,
     Path(profile_id): Path<String>,
     State(app_state): State<AppState<R>>,
     Extension(user_token): Extension<UserToken>,
-    Xml(staging_profiles_start_request): Xml<StagingProfilesStartRequest>,
-) -> Result<Xml<StagingProfilesPromoteResponse>, ApiError> {
+    XmlOrJson(staging_profiles_start_request): XmlOrJson<StagingProfilesStartRequest>,
+) -> Result<Response, ApiError> {
     tracing::debug!("Request to start staging profile");
 
     let repository = app_state
         .repository
-        .start(&user_token.token_username, &profile_id)
+        .start(&user_token.token_username, &addr.ip(), &profile_id)
         .await?;
 
     let staging_profiles_start_response = StagingProfilesPromoteResponse::new(
@@ -73,16 +97,21 @@ pub(crate) async fn staging_profiles_start_endpoint<R: Repository>(
         staging_profiles_start_request.data.description,
     );
 
-    Ok(Xml(staging_profiles_start_response))
+    Ok(respond_to_accepts_header(
+        &headers,
+        staging_profiles_start_response,
+    ))
 }
 
-#[derive(Debug, PartialEq, ex_em_ell::FromXmlDocument)]
+#[derive(Debug, PartialEq, Deserialize, ex_em_ell::FromXmlDocument)]
+#[serde(rename_all = "camelCase")]
 #[ex_em_ell(rename = "promoteRequest")]
 pub(crate) struct StagingProfilesStartRequest {
     data: StagingProfilesStartRequestData,
 }
 
-#[derive(Debug, PartialEq, ex_em_ell::FromXmlElement)]
+#[derive(Debug, PartialEq, Deserialize, ex_em_ell::FromXmlElement)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct StagingProfilesStartRequestData {
     description: String,
 }
@@ -90,6 +119,7 @@ pub(crate) struct StagingProfilesStartRequestData {
 #[instrument(skip(app_state, user_token, request))]
 pub(crate) async fn staging_deploy_by_repository_id<R: Repository>(
     TypedHeader(_user_agent): TypedHeader<UserAgent>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Path((repository_id, file_path)): Path<(String, String)>,
     State(app_state): State<AppState<R>>,
     Extension(user_token): Extension<UserToken>,
@@ -102,8 +132,11 @@ pub(crate) async fn staging_deploy_by_repository_id<R: Repository>(
         return Ok(StatusCode::CREATED);
     }
 
-    let repository_key =
-        RepositoryKey::from_user_id_and_repository_id(&user_token.token_username, &repository_id)?;
+    let repository_key = RepositoryKey::from_user_context_and_repository_id(
+        &user_token.token_username,
+        &addr.ip(),
+        &repository_id,
+    )?;
 
     app_state
         .repository
@@ -133,97 +166,210 @@ pub(crate) async fn staging_deploy_by_repository_id_get(
 #[instrument(skip(app_state, user_token, staging_profiles_finish_request))]
 pub(crate) async fn staging_profiles_finish_endpoint<R: Repository>(
     Host(host): Host,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     TypedHeader(_user_agent): TypedHeader<UserAgent>,
     Path(profile_id): Path<String>,
     State(app_state): State<AppState<R>>,
     Extension(user_token): Extension<UserToken>,
-    Xml(staging_profiles_finish_request): Xml<StagingProfilesFinishRequest>,
+    XmlOrJson(staging_profiles_finish_request): XmlOrJson<StagingProfilesFinishRequest>,
 ) -> Result<StatusCode, ApiError> {
     tracing::debug!("Request to finish profile");
 
-    let repository_key = RepositoryKey::from_user_id_and_repository_id(
+    let repository_key = RepositoryKey::from_user_context_and_repository_id(
         &user_token.token_username,
+        &addr.ip(),
         &staging_profiles_finish_request.data.staged_repository_id,
     )?;
 
-    let zip_data = app_state.repository.finish(&repository_key).await?;
-    let zip_data = zip_data.as_buffer()?;
-
     let credentials = user_token.as_credentials();
 
-    app_state
-        .portal_api_client
-        .upload_from_memory(
-            &credentials,
-            &format!(
-                "{} (via OSSRH API Proxy)",
-                repository_key.get_repository_id()
-            ),
-            PublishingType::Automatic,
-            zip_data,
-        )
-        .await?;
+    publish(
+        &app_state.portal_api_client,
+        app_state.repository.deref(),
+        &credentials,
+        &repository_key,
+        PublishingType::Automatic,
+    )
+    .await?;
 
     Ok(StatusCode::OK)
 }
 
-#[derive(Debug, PartialEq, ex_em_ell::FromXmlDocument)]
+#[derive(Debug, PartialEq, Deserialize, ex_em_ell::FromXmlDocument)]
+#[serde(rename_all = "camelCase")]
 #[ex_em_ell(rename = "promoteRequest")]
 pub(crate) struct StagingProfilesFinishRequest {
     data: StagingProfilesFinishRequestData,
 }
 
-#[derive(Debug, PartialEq, ex_em_ell::FromXmlElement)]
+#[derive(Debug, PartialEq, Deserialize, ex_em_ell::FromXmlElement)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct StagingProfilesFinishRequestData {
     staged_repository_id: String,
     description: String,
 }
 
-#[instrument]
-pub(crate) async fn staging_repository(
+#[instrument(skip(headers, app_state, user_token))]
+pub(crate) async fn staging_repository<R: Repository>(
     Host(host): Host,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     TypedHeader(_user_agent): TypedHeader<UserAgent>,
+    headers: HeaderMap,
     Path(repository_id): Path<String>,
-) -> Result<Xml<StagingRepositoryResponse>, ApiError> {
+    State(app_state): State<AppState<R>>,
+    Extension(user_token): Extension<UserToken>,
+) -> Result<Response, ApiError> {
     tracing::debug!("Request to get repository");
 
-    let response = StagingRepositoryResponse::new(&host, &repository_id);
+    let repository_key = RepositoryKey::from_user_context_and_repository_id(
+        &user_token.token_username,
+        &addr.ip(),
+        &repository_id,
+    )?;
 
-    Ok(Xml(response))
+    let repository_state = app_state.repository.get_state(&repository_key).await?;
+
+    let response = StagingRepositoryResponse::new(&host, &repository_id, repository_state);
+
+    Ok(respond_to_accepts_header(&headers, response))
 }
 
-#[instrument(skip(staging_bulk_promote_request))]
-pub(crate) async fn staging_bulk_promote(
+#[instrument(skip(app_state, user_token, staging_bulk_promote_request))]
+pub(crate) async fn staging_bulk_promote<R: Repository>(
+    Host(host): Host,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     TypedHeader(_user_agent): TypedHeader<UserAgent>,
-    Xml(staging_bulk_promote_request): Xml<StagingBulkPromoteRequest>,
+    State(app_state): State<AppState<R>>,
+    Extension(user_token): Extension<UserToken>,
+
+    XmlOrJson(staging_bulk_promote_request): XmlOrJson<StagingBulkPromoteRequest>,
 ) -> Result<StatusCode, ApiError> {
     tracing::debug!(
         "Request to bulk promote repositories: {}",
         staging_bulk_promote_request
             .data
             .staged_repository_ids
-            .into_iter()
-            .map(|ws| ws.0)
+            .iter()
+            .map(|ws| ws.0.to_owned())
             .join(", ")
     );
+
+    for repository_id in staging_bulk_promote_request.data.staged_repository_ids {
+        let repository_key = RepositoryKey::from_user_context_and_repository_id(
+            &user_token.token_username,
+            &addr.ip(),
+            &repository_id.0,
+        )?;
+
+        app_state.repository.release(&repository_key).await?;
+    }
 
     Ok(StatusCode::OK)
 }
 
-#[derive(Debug, PartialEq, ex_em_ell::FromXmlDocument)]
+#[derive(Debug, PartialEq, Deserialize, ex_em_ell::FromXmlDocument)]
+#[serde(rename_all = "camelCase")]
 #[ex_em_ell(rename = "stagingActionRequest")]
 pub(crate) struct StagingBulkPromoteRequest {
     data: StagingBulkPromoteRequestData,
 }
 
-#[derive(Debug, PartialEq, ex_em_ell::FromXmlElement)]
+#[derive(Debug, PartialEq, Deserialize, ex_em_ell::FromXmlElement)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct StagingBulkPromoteRequestData {
     staged_repository_ids: Vec<WrappedString>,
     description: String,
     auto_drop_after_release: bool,
 }
 
-#[derive(Debug, ex_em_ell::ToXmlDocument)]
+#[instrument(skip(app_state, user_token, staging_bulk_close_request))]
+pub(crate) async fn staging_bulk_close<R: Repository>(
+    Host(host): Host,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    TypedHeader(_user_agent): TypedHeader<UserAgent>,
+    State(app_state): State<AppState<R>>,
+    Extension(user_token): Extension<UserToken>,
+    XmlOrJson(staging_bulk_close_request): XmlOrJson<StagingBulkPromoteRequest>,
+) -> Result<StatusCode, ApiError> {
+    tracing::debug!(
+        "Request to bulk close repositories: {}",
+        staging_bulk_close_request
+            .data
+            .staged_repository_ids
+            .iter()
+            .map(|ws| ws.0.to_owned())
+            .join(", ")
+    );
+
+    let username = user_token.token_username.clone();
+
+    let credentials = user_token.as_credentials();
+
+    for repository_id in staging_bulk_close_request.data.staged_repository_ids {
+        let repository_key = RepositoryKey::from_user_context_and_repository_id(
+            &username,
+            &addr.ip(),
+            &repository_id.0,
+        )?;
+
+        publish(
+            &app_state.portal_api_client,
+            app_state.repository.deref(),
+            &credentials,
+            &repository_key,
+            PublishingType::Automatic,
+        )
+        .await?;
+    }
+
+    Ok(StatusCode::OK)
+}
+
+#[instrument(skip(app_state, user_token, request))]
+pub(crate) async fn staging_deploy_maven2<R: Repository>(
+    TypedHeader(_user_agent): TypedHeader<UserAgent>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    Path(file_path): Path<String>,
+    State(app_state): State<AppState<R>>,
+    Extension(user_token): Extension<UserToken>,
+    request: Request,
+) -> Result<impl IntoResponse, ApiError> {
+    tracing::debug!("Request to upload file to staging repository");
+
+    let repository_key = app_state
+        .repository
+        .open_no_profile_repository(&user_token.token_username, &addr.ip())
+        .await?;
+
+    app_state
+        .repository
+        .add_file(
+            &repository_key,
+            file_path,
+            request
+                .into_body()
+                .into_data_stream()
+                .map_err(|e| eyre::eyre!("Issue with the request body: {e}")),
+        )
+        .await?;
+
+    Ok(StatusCode::CREATED)
+}
+
+#[instrument(skip(_app_state, _user_token))]
+pub(crate) async fn staging_deploy_maven2_get<R: Repository>(
+    TypedHeader(_user_agent): TypedHeader<UserAgent>,
+    Path(file_path): Path<String>,
+    State(_app_state): State<AppState<R>>,
+    Extension(_user_token): Extension<UserToken>,
+) -> Result<impl IntoResponse, ApiError> {
+    tracing::debug!("Request to get a file from a staging repository");
+
+    Ok(StatusCode::NOT_FOUND)
+}
+
+#[derive(Debug, Serialize, ex_em_ell::ToXmlDocument)]
+#[serde(rename_all = "camelCase")]
 #[ex_em_ell(rename = "stagingProfiles")]
 pub(crate) struct StagingProfilesEvaluateResponse {
     data: Vec<StagingProfile>,
@@ -241,7 +387,8 @@ impl StagingProfilesEvaluateResponse {
     }
 }
 
-#[derive(Debug, ex_em_ell::ToXmlDocument)]
+#[derive(Debug, Serialize, ex_em_ell::ToXmlDocument)]
+#[serde(rename_all = "camelCase")]
 #[ex_em_ell(rename = "profileResponse")]
 pub(crate) struct StagingProfilesResponse {
     data: StagingProfile,
@@ -259,7 +406,8 @@ impl StagingProfilesResponse {
     }
 }
 
-#[derive(Debug, ex_em_ell::ToXmlDocument)]
+#[derive(Debug, Serialize, ex_em_ell::ToXmlDocument)]
+#[serde(rename_all = "camelCase")]
 #[ex_em_ell(rename = "promoteResponse")]
 pub(crate) struct StagingProfilesPromoteResponse {
     data: StagingProfilesResponseData,
@@ -276,14 +424,17 @@ impl StagingProfilesPromoteResponse {
     }
 }
 
-#[derive(Debug, ex_em_ell::ToXmlElement)]
+#[derive(Debug, Serialize, ex_em_ell::ToXmlElement)]
+#[serde(rename_all = "camelCase")]
 struct StagingProfilesResponseData {
     staged_repository_id: String,
     description: String,
 }
 
-#[derive(Debug, ex_em_ell::ToXmlElement, ex_em_ell::NamedXmlElement)]
+#[derive(Debug, Serialize, ex_em_ell::ToXmlElement, ex_em_ell::NamedXmlElement)]
+#[serde(rename_all = "camelCase")]
 struct StagingProfile {
+    #[serde(rename = "resourceURI")]
     #[ex_em_ell(rename = "resourceURI")]
     resource_uri: String,
     id: String,
@@ -292,7 +443,8 @@ struct StagingProfile {
     repository_template_id: String,
     repository_target_id: String,
     in_progress: bool,
-    order: String,
+    order: u32,
+    #[serde(rename = "deployURI")]
     #[ex_em_ell(rename = "deployURI")]
     deploy_uri: String,
     target_groups: Vec<WrappedString>,
@@ -321,7 +473,7 @@ impl StagingProfile {
             repository_template_id: "default_hosted_release".to_string(),
             repository_target_id: "repository_target_id".to_string(),
             in_progress: false,
-            order: "12345".to_string(),
+            order: 12345,
             deploy_uri: format!("{base_url}/service/local/staging/deploy/maven2"),
             target_groups: vec![WrappedString("staging".to_string())],
             finish_notify_roles: vec![WrappedString(format!("{namespace}-deployer"))],
@@ -341,7 +493,7 @@ impl StagingProfile {
     }
 }
 
-#[derive(Debug, PartialEq, ex_em_ell::NamedXmlElement)]
+#[derive(Debug, Serialize, PartialEq, Deserialize, ex_em_ell::NamedXmlElement)]
 #[ex_em_ell(name = "string")]
 struct WrappedString(String);
 
@@ -374,6 +526,17 @@ impl ex_em_ell::FromXmlElement for WrappedString {
 #[derive(Debug)]
 struct Properties();
 
+impl Serialize for Properties {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        let mut map = serializer.serialize_map(Some(1))?;
+        map.serialize_entry("@class", "linked-hash-map")?;
+        map.end()
+    }
+}
+
 impl ex_em_ell::ToXmlElement for Properties {
     fn to_xml_element<W: std::io::Write>(
         self: &Self,
@@ -394,43 +557,46 @@ impl ex_em_ell::ToXmlElement for Properties {
     }
 }
 
-#[derive(Debug, ex_em_ell::ToXmlDocument)]
+#[derive(Debug, Serialize, ex_em_ell::ToXmlDocument)]
+#[serde(rename_all = "camelCase")]
 #[ex_em_ell(rename = "stagingProfileRepository")]
 pub(crate) struct StagingRepositoryResponse {
     profile_id: String,
     profile_name: String,
     profile_type: String,
     repository_id: String,
+    #[serde(rename = "type")]
     #[ex_em_ell(rename = "type")]
     repository_type: String,
     policy: String,
     user_id: String,
     user_agent: String,
     ip_address: String,
+    #[serde(rename = "repositoryURI")]
     #[ex_em_ell(rename = "repositoryURI")]
     repository_uri: String,
     created: String,
     created_date: String,
-    created_timestamp: String,
+    created_timestamp: u32,
     updated: String,
     updated_date: String,
-    updated_timestamp: String,
+    updated_timestamp: u32,
     description: String,
     provider: String,
     release_repository_id: String,
     release_repository_name: String,
-    notifications: String,
+    notifications: u32,
     transitioning: bool,
 }
 
 impl StagingRepositoryResponse {
-    fn new(base_url: &str, repository_id: &str) -> Self {
+    fn new(base_url: &str, repository_id: &str, repository_state: RepositoryState) -> Self {
         Self {
             profile_id: "profile_id".to_string(), // TODO: do we need this to be persisted?
             profile_name: "profile_name".to_string(),
             profile_type: "repository".to_string(),
             repository_id: repository_id.to_string(),
-            repository_type: "closed".to_string(),
+            repository_type: repository_state.to_string(),
             policy: "release".to_string(),
             user_id: "user_id".to_string(),
             user_agent: "user_agent".to_string(),
@@ -438,15 +604,15 @@ impl StagingRepositoryResponse {
             repository_uri: format!("{base_url}/content/repositories/{repository_id}"),
             created: "1970-01-01T00:00:00.000Z".to_string(),
             created_date: "Thu Jan 1 00:00:00 UTC 1970".to_string(),
-            created_timestamp: "0".to_string(),
+            created_timestamp: 0,
             updated: "1970-01-01T00:00:00.000Z".to_string(),
             updated_date: "Thu Jan 1 00:00:00 UTC 1970".to_string(),
-            updated_timestamp: "0".to_string(),
+            updated_timestamp: 0,
             description: "description".to_string(),
             provider: "maven2".to_string(),
             release_repository_id: "releases".to_string(),
             release_repository_name: "Releases".to_string(),
-            notifications: "0".to_string(),
+            notifications: 0,
             transitioning: false,
         }
     }
@@ -504,6 +670,55 @@ mod tests {
 
         Ok(())
     }
+    #[test]
+    fn test_json_serialization_staging_profiles_evaluate_response() -> eyre::Result<()> {
+        let staging_profiles_evaluate_response = StagingProfilesEvaluateResponse::new(
+            "https://s01.oss.sonatype.org".to_string(),
+            "com.example".to_string(),
+        );
+        let actual_json = serde_json::to_string_pretty(&staging_profiles_evaluate_response)?;
+        let expected_json = r#"{
+  "data": [
+    {
+      "resourceURI": "https://s01.oss.sonatype.org/service/local/staging/profile_evaluate/com.example",
+      "id": "com.example",
+      "name": "com.example",
+      "repositoryType": "maven2",
+      "repositoryTemplateId": "default_hosted_release",
+      "repositoryTargetId": "repository_target_id",
+      "inProgress": false,
+      "order": 12345,
+      "deployURI": "https://s01.oss.sonatype.org/service/local/staging/deploy/maven2",
+      "targetGroups": [
+        "staging"
+      ],
+      "finishNotifyRoles": [
+        "com.example-deployer"
+      ],
+      "promotionNotifyRoles": [],
+      "dropNotifyRoles": [],
+      "closeRuleSets": [
+        "close_rule_set"
+      ],
+      "promoteRuleSets": [],
+      "promotionTargetRepository": "releases",
+      "mode": "BOTH",
+      "finishNotifyCreator": true,
+      "promotionNotifyCreator": true,
+      "dropNotifyCreator": true,
+      "autoStagingDisabled": false,
+      "repositoriesSearchable": false,
+      "properties": {
+        "@class": "linked-hash-map"
+      }
+    }
+  ]
+}"#;
+
+        assert_eq!(actual_json, expected_json);
+
+        Ok(())
+    }
 
     #[test]
     fn test_xml_serialization_staging_profiles_response() -> eyre::Result<()> {
@@ -551,12 +766,78 @@ mod tests {
 
         Ok(())
     }
+    #[test]
+    fn test_json_serialization_staging_profiles_response() -> eyre::Result<()> {
+        let staging_profiles_evaluate_response = StagingProfilesResponse::new(
+            "https://s01.oss.sonatype.org".to_string(),
+            "com.example".to_string(),
+        );
+        let actual_json = serde_json::to_string_pretty(&staging_profiles_evaluate_response)?;
+        let expected_json = r#"{
+  "data": {
+    "resourceURI": "https://s01.oss.sonatype.org/service/local/staging/profiles/com.example/com.example",
+    "id": "com.example",
+    "name": "com.example",
+    "repositoryType": "maven2",
+    "repositoryTemplateId": "default_hosted_release",
+    "repositoryTargetId": "repository_target_id",
+    "inProgress": false,
+    "order": 12345,
+    "deployURI": "https://s01.oss.sonatype.org/service/local/staging/deploy/maven2",
+    "targetGroups": [
+      "staging"
+    ],
+    "finishNotifyRoles": [
+      "com.example-deployer"
+    ],
+    "promotionNotifyRoles": [],
+    "dropNotifyRoles": [],
+    "closeRuleSets": [
+      "close_rule_set"
+    ],
+    "promoteRuleSets": [],
+    "promotionTargetRepository": "releases",
+    "mode": "BOTH",
+    "finishNotifyCreator": true,
+    "promotionNotifyCreator": true,
+    "dropNotifyCreator": true,
+    "autoStagingDisabled": false,
+    "repositoriesSearchable": false,
+    "properties": {
+      "@class": "linked-hash-map"
+    }
+  }
+}"#;
+
+        assert_eq!(actual_json, expected_json);
+
+        Ok(())
+    }
 
     #[test]
     fn test_xml_deserialization_staging_profiles_start_request() -> eyre::Result<()> {
         let actual_xml = "<promoteRequest><data><description>com.example:example:0.1.0</description></data></promoteRequest>";
         let actual_staging_profile_request: StagingProfilesStartRequest =
             ex_em_ell::from_reader(actual_xml.as_bytes())?;
+        let expected_staging_profile_request = StagingProfilesStartRequest {
+            data: StagingProfilesStartRequestData {
+                description: "com.example:example:0.1.0".to_string(),
+            },
+        };
+
+        assert_eq!(
+            actual_staging_profile_request,
+            expected_staging_profile_request
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_json_deserialization_staging_profiles_start_request() -> eyre::Result<()> {
+        let actual_json = r#"{ "data": { "description": "com.example:example:0.1.0" } }"#;
+        let actual_staging_profile_request: StagingProfilesStartRequest =
+            serde_json::from_reader(actual_json.as_bytes())?;
         let expected_staging_profile_request = StagingProfilesStartRequest {
             data: StagingProfilesStartRequestData {
                 description: "com.example:example:0.1.0".to_string(),
@@ -592,9 +873,71 @@ mod tests {
     }
 
     #[test]
+    fn test_json_serialization_staging_profiles_start_response() -> eyre::Result<()> {
+        let staging_profiles_start_response = StagingProfilesPromoteResponse::new(
+            "comexample-1".to_string(),
+            "com.example:example:0.1.0".to_string(),
+        );
+        let actual_json = serde_json::to_string_pretty(&staging_profiles_start_response)?;
+        let expected_json = r#"{
+  "data": {
+    "stagedRepositoryId": "comexample-1",
+    "description": "com.example:example:0.1.0"
+  }
+}"#;
+
+        assert_eq!(actual_json, expected_json);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_xml_deserialization_staging_profiles_finish_request() -> eyre::Result<()> {
+        let actual_xml = "<promoteRequest><data><stagedRepositoryId>comexample-1</stagedRepositoryId><description>com.example:example:0.1.0</description></data></promoteRequest>";
+        let actual_staging_profile_request: StagingProfilesFinishRequest =
+            ex_em_ell::from_reader(actual_xml.as_bytes())?;
+        let expected_staging_profile_request = StagingProfilesFinishRequest {
+            data: StagingProfilesFinishRequestData {
+                staged_repository_id: "comexample-1".to_string(),
+                description: "com.example:example:0.1.0".to_string(),
+            },
+        };
+
+        assert_eq!(
+            actual_staging_profile_request,
+            expected_staging_profile_request
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_json_deserialization_staging_profiles_finish_request() -> eyre::Result<()> {
+        let actual_json = r#"{ "data": { "stagedRepositoryId": "comexample-1", "description": "com.example:example:0.1.0" } }"#;
+        let actual_staging_profile_request: StagingProfilesFinishRequest =
+            serde_json::from_reader(actual_json.as_bytes())?;
+        let expected_staging_profile_request = StagingProfilesFinishRequest {
+            data: StagingProfilesFinishRequestData {
+                staged_repository_id: "comexample-1".to_string(),
+                description: "com.example:example:0.1.0".to_string(),
+            },
+        };
+
+        assert_eq!(
+            actual_staging_profile_request,
+            expected_staging_profile_request
+        );
+
+        Ok(())
+    }
+
+    #[test]
     fn test_xml_serialization_repository_response() -> eyre::Result<()> {
-        let repository_response =
-            StagingRepositoryResponse::new("https://s01.oss.sonatype.org", "comexample-1");
+        let repository_response = StagingRepositoryResponse::new(
+            "https://s01.oss.sonatype.org",
+            "comexample-1",
+            RepositoryState::Closed,
+        );
         let actual_xml = ex_em_ell::to_string_pretty(&repository_response)?;
         let expected_xml = r#"<?xml version="1.0" encoding="utf-8"?>
 <stagingProfileRepository>
@@ -628,10 +971,69 @@ mod tests {
     }
 
     #[test]
-    fn test_xml_serialization_staging_bulk_promote_request() -> eyre::Result<()> {
+    fn test_json_serialization_repository_response() -> eyre::Result<()> {
+        let repository_response = StagingRepositoryResponse::new(
+            "https://s01.oss.sonatype.org",
+            "comexample-1",
+            RepositoryState::Closed,
+        );
+        let actual_json = serde_json::to_string_pretty(&repository_response)?;
+        let expected_json = r#"{
+  "profileId": "profile_id",
+  "profileName": "profile_name",
+  "profileType": "repository",
+  "repositoryId": "comexample-1",
+  "type": "closed",
+  "policy": "release",
+  "userId": "user_id",
+  "userAgent": "user_agent",
+  "ipAddress": "ip_address",
+  "repositoryURI": "https://s01.oss.sonatype.org/content/repositories/comexample-1",
+  "created": "1970-01-01T00:00:00.000Z",
+  "createdDate": "Thu Jan 1 00:00:00 UTC 1970",
+  "createdTimestamp": 0,
+  "updated": "1970-01-01T00:00:00.000Z",
+  "updatedDate": "Thu Jan 1 00:00:00 UTC 1970",
+  "updatedTimestamp": 0,
+  "description": "description",
+  "provider": "maven2",
+  "releaseRepositoryId": "releases",
+  "releaseRepositoryName": "Releases",
+  "notifications": 0,
+  "transitioning": false
+}"#;
+
+        assert_eq!(actual_json, expected_json);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_xml_deserialization_staging_bulk_promote_request() -> eyre::Result<()> {
         let actual_xml = "<stagingActionRequest><data><stagedRepositoryIds><string>comexample-1</string></stagedRepositoryIds><description>description</description><autoDropAfterRelease>true</autoDropAfterRelease></data></stagingActionRequest>";
         let actual_staging_bulk_promote_request: StagingBulkPromoteRequest =
             ex_em_ell::from_reader(actual_xml.as_bytes())?;
+        let expected_bulk_promote_request = StagingBulkPromoteRequest {
+            data: StagingBulkPromoteRequestData {
+                staged_repository_ids: vec![WrappedString("comexample-1".to_string())],
+                description: "description".to_string(),
+                auto_drop_after_release: true,
+            },
+        };
+
+        assert_eq!(
+            actual_staging_bulk_promote_request,
+            expected_bulk_promote_request
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_json_deserialization_staging_bulk_promote_request() -> eyre::Result<()> {
+        let actual_json = r#"{ "data": { "stagedRepositoryIds": ["comexample-1"], "description": "description", "autoDropAfterRelease": true } }"#;
+        let actual_staging_bulk_promote_request: StagingBulkPromoteRequest =
+            serde_json::from_reader(actual_json.as_bytes())?;
         let expected_bulk_promote_request = StagingBulkPromoteRequest {
             data: StagingBulkPromoteRequestData {
                 staged_repository_ids: vec![WrappedString("comexample-1".to_string())],

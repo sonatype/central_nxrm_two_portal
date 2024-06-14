@@ -7,14 +7,20 @@ use path_absolutize::Absolutize;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::io;
+use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use temp_dir::TempDir;
+use tokio::fs::OpenOptions;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::RwLock;
 use tokio::{fs::File, io::BufWriter};
 use tokio_util::io::StreamReader;
 use tracing::instrument;
 
-use crate::traits::{Repository, RepositoryKey, ZipFile};
+use crate::traits::{Repository, RepositoryKey, RepositoryState, ZipFile, NO_PROFILE};
+
+const REPOSITORY_FOLDER: &str = "repository_contents";
+const REPOSITORY_STATE_FILE: &str = "repository_state";
 
 pub struct LocalRepository {
     root: TempDir,
@@ -35,8 +41,13 @@ impl LocalRepository {
         })
     }
 
-    async fn retrieve_new_index(&self, user_id: &str, profile_id: &str) -> eyre::Result<u32> {
-        let repository_index_key = create_repository_index_key(user_id, profile_id);
+    async fn retrieve_new_index(
+        &self,
+        user_id: &str,
+        ip_addr: &IpAddr,
+        profile_id: &str,
+    ) -> eyre::Result<u32> {
+        let repository_index_key = create_repository_index_key(user_id, ip_addr, profile_id);
         let mut repository_indexes = self.repository_indexes.write().await;
         let repository_index = repository_indexes
             .entry(repository_index_key.to_string())
@@ -46,10 +57,27 @@ impl LocalRepository {
         Ok(repository_index.to_owned())
     }
 
+    async fn retrieve_current_no_profile_index(
+        &self,
+        user_id: &str,
+        ip_addr: &IpAddr,
+    ) -> eyre::Result<u32> {
+        let repository_index_key = create_repository_index_key(user_id, ip_addr, NO_PROFILE);
+        let mut repository_indexes = self.repository_indexes.write().await;
+        let repository_index = repository_indexes
+            .entry(repository_index_key.to_string())
+            .or_insert(0);
+
+        Ok(repository_index.to_owned())
+    }
+
     async fn validate_repository(&self, repository_key: &RepositoryKey) -> eyre::Result<()> {
         let repository_indexes = self.repository_indexes.read().await;
-        let repository_index_key =
-            create_repository_index_key(&repository_key.user_id, &repository_key.profile_id);
+        let repository_index_key = create_repository_index_key(
+            &repository_key.user_id,
+            &repository_key.ip_addr,
+            &repository_key.get_profile_id(),
+        );
         let max_index = repository_indexes.get(&repository_index_key);
         match max_index {
             None => eyre::bail!("Repository {repository_key} does not exist"),
@@ -67,7 +95,32 @@ impl LocalRepository {
         repository_key: &RepositoryKey,
     ) -> eyre::Result<PathBuf> {
         let repository_file_path = repository_key_to_file_path(repository_key);
-        let absolute_path = self.root.path().join(repository_file_path);
+        let absolute_path = self
+            .root
+            .path()
+            .join(repository_file_path)
+            .join(REPOSITORY_FOLDER);
+        let absolute_path = absolute_path
+            .absolutize()
+            .wrap_err_with(|| format!("Failed to canonicalize {absolute_path:?}"))?;
+
+        if absolute_path.starts_with(self.root.path()) {
+            Ok(absolute_path.into_owned())
+        } else {
+            Err(eyre::eyre!("Invalid repository: {repository_key}"))
+        }
+    }
+
+    fn absolute_path_for_repository_state(
+        &self,
+        repository_key: &RepositoryKey,
+    ) -> eyre::Result<PathBuf> {
+        let repository_file_path = repository_key_to_file_path(repository_key);
+        let absolute_path = self
+            .root
+            .path()
+            .join(repository_file_path)
+            .join(REPOSITORY_STATE_FILE);
         let absolute_path = absolute_path
             .absolutize()
             .wrap_err_with(|| format!("Failed to canonicalize {absolute_path:?}"))?;
@@ -99,19 +152,95 @@ impl LocalRepository {
             ))
         }
     }
+
+    async fn write_repository_state(
+        &self,
+        repository_key: &RepositoryKey,
+        repository_state: RepositoryState,
+    ) -> eyre::Result<()> {
+        let state_file_path = self.absolute_path_for_repository_state(repository_key)?;
+        let mut state_file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(state_file_path)
+            .await?;
+
+        state_file
+            .write_all(repository_state.to_string().as_bytes())
+            .await?;
+
+        Ok(())
+    }
+
+    async fn read_repository_state(
+        &self,
+        repository_key: &RepositoryKey,
+    ) -> eyre::Result<RepositoryState> {
+        let state_file_path = self.absolute_path_for_repository_state(repository_key)?;
+        let mut state_file = File::open(state_file_path).await?;
+
+        let mut state_string = String::new();
+        state_file.read_to_string(&mut state_string).await?;
+
+        let state: RepositoryState = state_string
+            .trim()
+            .try_into()
+            .map_err(|e: String| eyre::eyre!(e))?;
+        Ok(state)
+    }
 }
 
 #[async_trait]
 impl Repository for LocalRepository {
     #[instrument]
-    async fn start(&self, user_id: &str, profile_id: &str) -> eyre::Result<RepositoryKey> {
-        let repository_index = self.retrieve_new_index(user_id, profile_id).await?;
-        let repository_key = RepositoryKey::new(user_id, profile_id, repository_index);
+    async fn start(
+        &self,
+        user_id: &str,
+        ip_addr: &IpAddr,
+        profile_id: &str,
+    ) -> eyre::Result<RepositoryKey> {
+        let repository_index = self
+            .retrieve_new_index(user_id, ip_addr, profile_id)
+            .await?;
+        let repository_key = RepositoryKey::new(
+            user_id,
+            ip_addr,
+            Some(profile_id.to_string()),
+            repository_index,
+        );
         tracing::debug!("Starting repository: {}", repository_key);
 
         let path = self.absolute_path_for_repository(&repository_key)?;
         tokio::fs::create_dir_all(&path).await?;
         tracing::trace!("Created repository folders: {path:?}");
+
+        self.write_repository_state(&repository_key, RepositoryState::Open)
+            .await?;
+        tracing::debug!("Opened the repository");
+
+        Ok(repository_key)
+    }
+
+    #[instrument]
+    async fn open_no_profile_repository(
+        &self,
+        user_id: &str,
+        ip_addr: &IpAddr,
+    ) -> eyre::Result<RepositoryKey> {
+        let repository_index = self
+            .retrieve_current_no_profile_index(user_id, ip_addr)
+            .await?;
+        let repository_key = RepositoryKey::new(user_id, ip_addr, None, repository_index);
+        tracing::debug!("Opening repository: {}", repository_key);
+
+        let path = self.absolute_path_for_repository(&repository_key)?;
+        tokio::fs::create_dir_all(&path).await?;
+        tracing::trace!("Created repository folders: {path:?}");
+
+        self.write_repository_state(&repository_key, RepositoryState::Open)
+            .await?;
+        tracing::debug!("Opened the repository");
 
         Ok(repository_key)
     }
@@ -190,7 +319,36 @@ impl Repository for LocalRepository {
         tokio::fs::remove_dir_all(&path).await?;
         tracing::debug!("Cleaned up the repository: {path:?}");
 
+        self.write_repository_state(repository_key, RepositoryState::Closed)
+            .await?;
+        tracing::debug!("Closed the repository");
+
         Ok(zip_file)
+    }
+
+    #[instrument]
+    async fn release(&self, repository_key: &RepositoryKey) -> eyre::Result<()> {
+        tracing::debug!("Releasing repository");
+        self.validate_repository(repository_key).await?;
+
+        self.write_repository_state(repository_key, RepositoryState::Released)
+            .await?;
+        tracing::debug!("Released the repository");
+
+        Ok(())
+    }
+
+    #[instrument]
+    async fn get_state(&self, repository_key: &RepositoryKey) -> eyre::Result<RepositoryState> {
+        tracing::debug!("Getting the state of repository");
+        let valid = self.validate_repository(repository_key).await;
+        if let Err(_error) = valid {
+            return Ok(RepositoryState::NotFound);
+        }
+
+        let state = self.read_repository_state(repository_key).await?;
+
+        Ok(state)
     }
 }
 
@@ -206,20 +364,26 @@ impl std::fmt::Debug for LocalRepository {
 /// Convenience function to ensure consistent construction of file paths
 fn repository_key_to_file_path(repository_key: &RepositoryKey) -> PathBuf {
     PathBuf::from(format!(
-        "{}/{}-{}/",
-        repository_key.user_id, repository_key.profile_id, repository_key.repository_index
+        "{}/{}/{}-{}/",
+        repository_key.user_id,
+        repository_key.ip_addr,
+        repository_key.get_profile_id(),
+        repository_key.repository_index
     ))
 }
 
 /// Convenience function to ensure consistent construction of repository index keys
-fn create_repository_index_key(user_id: &str, profile_id: &str) -> String {
-    format!("{user_id}/{profile_id}")
+fn create_repository_index_key(user_id: &str, ip_addr: &IpAddr, profile_id: &str) -> String {
+    format!("{user_id}/{ip_addr}/{profile_id}")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{Cursor, Read};
+    use std::{
+        io::{Cursor, Read},
+        net::Ipv4Addr,
+    };
     use zip::read::ZipArchive;
 
     #[tokio::test]
@@ -229,7 +393,13 @@ mod tests {
         let local_repository = LocalRepository::new()?;
 
         // start the repository
-        let repository_key = local_repository.start("test_user", "test_profile").await?;
+        let repository_key = local_repository
+            .start(
+                "test_user",
+                &IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                "test_profile",
+            )
+            .await?;
 
         let file_contents = futures::stream::once(async { Ok(Bytes::from(test_file_contents)) });
 
@@ -262,7 +432,13 @@ mod tests {
         let local_repository = LocalRepository::new()?;
 
         // start the repository
-        let repository_key = local_repository.start("test_user", "test_profile").await?;
+        let repository_key = local_repository
+            .start(
+                "test_user",
+                &IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                "test_profile",
+            )
+            .await?;
 
         let file_contents = futures::stream::once(async { Ok(Bytes::from("test_file_content")) });
 
