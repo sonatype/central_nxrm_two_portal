@@ -12,7 +12,7 @@ serde = { version = "1.0.203", features = ["derive"] }
 tokio = { version = "1.38.0", features = ["fs", "tracing"] }
 tokio-util = { version = "0.7.11", features = ["codec"] }
 tracing = "0.1.40"
-url = "2.5.0"
+url = "2.5.2"
 
 [dev-dependencies]
 clap = { version = "4.5.7", features = ["derive"] }
