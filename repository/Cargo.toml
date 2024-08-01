@@ -10,7 +10,7 @@ local = []
 [dependencies]
 async-trait = "0.1.81"
 async-walkdir = "1.0.0"
-bytes = "1.6.1"
+bytes = "1.7.0"
 eyre = "0.6.12"
 futures = "0.3.30"
 path-absolutize = "3.1.1"
