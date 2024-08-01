@@ -1,3 +1,6 @@
+// Copyright (c) 2024-present Sonatype, Inc. All rights reserved.
+// "Sonatype" is a trademark of Sonatype, Inc.
+
 use async_trait::async_trait;
 use axum::body::Body;
 use axum::body::Bytes;
@@ -71,7 +74,7 @@ impl From<Mime> for ContentType {
             }
         }
 
-        return ContentType::Unknown;
+        ContentType::Unknown
     }
 }
 
@@ -127,7 +130,7 @@ fn accept_content_type(headers: &HeaderMap) -> eyre::Result<ContentType> {
     let accept = mime_type_from_header(header::ACCEPT, headers).map(ContentType::from);
 
     match accept {
-        Ok(accept @ (ContentType::Xml | ContentType::Json)) => return Ok(accept),
+        Ok(accept @ (ContentType::Xml | ContentType::Json)) => Ok(accept),
         _ => content_type(headers),
     }
 }

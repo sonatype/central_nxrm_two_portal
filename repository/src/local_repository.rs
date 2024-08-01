@@ -1,3 +1,6 @@
+// Copyright (c) 2024-present Sonatype, Inc. All rights reserved.
+// "Sonatype" is a trademark of Sonatype, Inc.
+
 use async_trait::async_trait;
 use async_walkdir::{Filtering, WalkDir};
 use bytes::Bytes;
@@ -290,7 +293,7 @@ impl Repository for LocalRepository {
     async fn finish(&self, repository_key: &RepositoryKey) -> eyre::Result<ZipFile> {
         tracing::debug!("Finishing repository");
         self.validate_repository(repository_key).await?;
-        let path = self.absolute_path_for_repository(&repository_key)?;
+        let path = self.absolute_path_for_repository(repository_key)?;
         // create the zip file from all of the existing files
         let mut zip_file = ZipFile::in_memory();
 

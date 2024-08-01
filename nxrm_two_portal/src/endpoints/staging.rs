@@ -1,3 +1,6 @@
+// Copyright (c) 2024-present Sonatype, Inc. All rights reserved.
+// "Sonatype" is a trademark of Sonatype, Inc.
+
 use std::net::SocketAddr;
 use std::ops::Deref;
 
@@ -499,7 +502,7 @@ struct WrappedString(String);
 
 impl ex_em_ell::ToXmlElement for WrappedString {
     fn to_xml_element<W: std::io::Write>(
-        self: &Self,
+        &self,
         writer: &mut ex_em_ell::xml::EventWriter<W>,
         tag: &str,
     ) -> Result<(), ex_em_ell::errors::XmlWriteError> {
@@ -539,7 +542,7 @@ impl Serialize for Properties {
 
 impl ex_em_ell::ToXmlElement for Properties {
     fn to_xml_element<W: std::io::Write>(
-        self: &Self,
+        &self,
         writer: &mut ex_em_ell::xml::EventWriter<W>,
         tag: &str,
     ) -> Result<(), ex_em_ell::errors::XmlWriteError> {

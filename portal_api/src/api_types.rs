@@ -1,3 +1,6 @@
+// Copyright (c) 2024-present Sonatype, Inc. All rights reserved.
+// "Sonatype" is a trademark of Sonatype, Inc.
+
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
