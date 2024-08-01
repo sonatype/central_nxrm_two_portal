@@ -14,7 +14,6 @@
       url = "github:oxalica/rust-overlay";
       inputs = {
         nixpkgs.follows = "nixpkgs";
-        flake-utils.follows = "flake-utils";
       };
     };
   };
@@ -51,6 +50,9 @@
 
         nxrm_two_portal = craneLib.buildPackage (commonArgs // {
           inherit cargoArtifacts;
+
+          # Run tests via cargo nextest
+          doCheck = false;
         });
 
         mkMvn = { name, settingsFile }: pkgs.writeShellApplication {
@@ -120,6 +122,12 @@
         checks = {
           inherit nxrm_two_portal;
 
+          nextest = craneLib.cargoNextest (commonArgs // {
+            inherit cargoArtifacts;
+            partitions = 1;
+            partitionType = "count";
+          });
+
           clippy = craneLib.cargoClippy (commonArgs // {
             inherit cargoArtifacts;
           });
@@ -150,9 +158,11 @@
             cargo-edit
             cargo-msrv
             cargo-outdated
+            cargo-nextest
 
             # Orchestration
             just
+            licensure
 
             # GitHub tooling
             gh

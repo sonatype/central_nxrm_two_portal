@@ -1,3 +1,6 @@
+// Copyright (c) 2024-present Sonatype, Inc. All rights reserved.
+// "Sonatype" is a trademark of Sonatype, Inc.
+
 use async_trait::async_trait;
 use bytes::Bytes;
 use eyre::WrapErr;

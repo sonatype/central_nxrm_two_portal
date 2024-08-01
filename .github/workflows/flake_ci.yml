@@ -23,6 +23,9 @@ jobs:
     - name: Check the flake outputs
       run: nix flake check
 
+    - name: Check the license headers
+      run: nix develop --command licensure --project --check
+
     - name: Check the flake's formatting
       run: nix develop --command nixpkgs-fmt --check flake.nix
 

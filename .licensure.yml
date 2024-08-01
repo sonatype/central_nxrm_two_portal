@@ -1,0 +1,35 @@
+licenses:
+  - files: any
+    ident: Sonatype
+    authors:
+      - name: Sonatype Inc.
+    template: |
+      Copyright (c) [year]-present Sonatype, Inc. All rights reserved.
+      "Sonatype" is a trademark of Sonatype, Inc.
+    unwrap_text: false
+
+comments:
+  - extensions:
+      - rs
+    commenter:
+      type: line
+      comment_char: "//"
+      trailing_lines: 1
+
+change_in_place: true
+
+excludes:
+  - \.gitignore
+  - .*lock
+  - \.git/.*
+  - \.licensure\.yml
+  - README.*
+  - LICENSE.*
+  - .*\.(md|rst|txt)
+  - example_projects/**
+  - .*\.toml
+  - .*\.nix
+  - justfile
+  - \.envrc
+  - \.github/**
+  - .*\.xml

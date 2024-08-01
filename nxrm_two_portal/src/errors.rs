@@ -1,3 +1,6 @@
+// Copyright (c) 2024-present Sonatype, Inc. All rights reserved.
+// "Sonatype" is a trademark of Sonatype, Inc.
+
 use axum::{http::StatusCode, response::IntoResponse};
 
 pub(crate) struct ApiError(pub(crate) eyre::Error);
