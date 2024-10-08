@@ -14,7 +14,7 @@ bytes = "1.7.2"
 eyre = "0.6.12"
 futures = "0.3.31"
 path-absolutize = "3.1.1"
-temp-dir = "0.1.13"
+temp-dir = "0.1.14"
 tokio = { version = "1.40.0", features = ["fs", "tracing"] }
 tokio-util = { version = "0.7.12", features = ["io"] }
 tracing = "0.1.40"
