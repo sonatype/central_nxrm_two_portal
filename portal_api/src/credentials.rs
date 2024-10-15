@@ -8,14 +8,18 @@ use reqwest::{
     RequestBuilder,
 };
 
-pub struct Credentials {
-    username: String,
-    password: String,
+pub enum Credentials {
+    UserToken { username: String, password: String },
+    Jwt { token: String },
 }
 
 impl Credentials {
-    pub fn new(username: String, password: String) -> Self {
-        Self { username, password }
+    pub fn from_usertoken(username: String, password: String) -> Self {
+        Self::UserToken { username, password }
+    }
+
+    pub fn from_jwt(token: String) -> Self {
+        Self::Jwt { token }
     }
 
     pub fn add_credentials_to_request(
@@ -29,7 +33,12 @@ impl Credentials {
     }
 
     fn as_bearer_token(&self) -> String {
-        let token = STANDARD.encode(format!("{}:{}", self.username, self.password));
-        format!("UserToken {token}")
+        let token = match self {
+            Self::UserToken { username, password } => {
+                STANDARD.encode(format!("{username}:{password}"))
+            }
+            Self::Jwt { token } => token.to_owned(),
+        };
+        format!("Bearer {token}")
     }
 }

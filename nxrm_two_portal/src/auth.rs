@@ -33,7 +33,7 @@ impl UserToken {
     }
 
     pub fn as_credentials(self) -> Credentials {
-        Credentials::new(self.token_username, self.token_password)
+        Credentials::from_usertoken(self.token_username, self.token_password)
     }
 }
 

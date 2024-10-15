@@ -47,9 +47,12 @@ pub async fn main() -> eyre::Result<()> {
 
     let password = rpassword::prompt_password("Publisher token password: ")?;
 
-    let credentials = Credentials::new(username, password);
+    let credentials = Credentials::from_usertoken(username, password);
 
     let api_client = PortalApiClient::client(&host)?;
+
+    let jwt = api_client.request_jwt(&credentials).await?;
+    let credentials = Credentials::from_jwt(jwt);
 
     let deployment_name = cli.deployment_name.unwrap_or("Upload".to_string());
 
