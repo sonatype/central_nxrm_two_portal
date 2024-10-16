@@ -31,6 +31,7 @@ run-staging:
 
 # Spin up the proxy pointing at a locally running server
 run-local:
-  RUST_LOG=debug,nxrm_two_portal::endpoints::fallback=trace,h2=info,hyper=info,reqwest=info,rustls=info \
+  RUST_LOG=debug,nxrm_two_portal::endpoints::fallback=trace,nxrm_two_portal::auth=trace,h2=info,hyper=info,reqwest=info,rustls=info \
   NXRM_TWO_PORTAL_CENTRAL_URL=http://localhost:3000 \
+  NXRM_TWO_PORTAL_JWT_PUBLIC_KEY_PATH=ossrh-proxy-service-dev-public-key.pem \
   nix run

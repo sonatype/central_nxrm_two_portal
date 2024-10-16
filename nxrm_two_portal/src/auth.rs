@@ -1,20 +1,30 @@
 // Copyright (c) 2024-present Sonatype, Inc. All rights reserved.
 // "Sonatype" is a trademark of Sonatype, Inc.
 
+use std::collections::HashSet;
+
 use axum::{
-    extract::Request,
+    extract::{Request, State},
     http::{header::AUTHORIZATION, StatusCode},
     middleware::Next,
     response::Response,
 };
 use base64::prelude::{Engine, BASE64_STANDARD};
 use eyre::{bail, OptionExt};
+use jwt_simple::{
+    algorithms::{RS256PublicKey, RSAPublicKeyLike},
+    common::VerificationOptions,
+    token::Token,
+};
 use portal_api::Credentials;
-use tracing::instrument;
+use repository::traits::Repository;
+use serde::{Deserialize, Serialize};
+use tracing::{instrument, Level};
 
-#[derive(Clone)]
-pub struct UserToken {
-    pub token_username: String,
+use crate::state::AppState;
+
+struct UserToken {
+    token_username: String,
     token_password: String,
 }
 
@@ -37,8 +47,26 @@ impl UserToken {
     }
 }
 
-#[instrument(skip(req, next))]
-pub async fn auth(mut req: Request, next: Next) -> Result<Response, StatusCode> {
+#[derive(Clone)]
+pub struct UserAuthContext {
+    pub user_id: String,
+    pub token_username: String,
+    pub namespaces: Vec<String>,
+    jwt: String,
+}
+
+impl UserAuthContext {
+    pub fn as_credentials(&self) -> Credentials {
+        Credentials::from_jwt(self.jwt.clone())
+    }
+}
+
+#[instrument(skip(app_state, req, next))]
+pub async fn auth<R: Repository>(
+    State(app_state): State<AppState<R>>,
+    mut req: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
     let auth_header = req
         .headers()
         .get(AUTHORIZATION)
@@ -56,7 +84,36 @@ pub async fn auth(mut req: Request, next: Next) -> Result<Response, StatusCode> 
         tracing::error!("Failed to decode user token: {e}");
         StatusCode::UNAUTHORIZED
     })?;
-    req.extensions_mut().insert(user_token);
+    let name_code = user_token.token_username.clone();
+    tracing::trace!(name_code = ?name_code, "Parsed user token from header");
+
+    let jwt = app_state
+        .portal_api_client
+        .request_jwt(&user_token.as_credentials())
+        .await
+        .map_err(|e| {
+            tracing::error!(name_code = ?name_code, "Failed to request a JWT: {e}");
+            StatusCode::UNAUTHORIZED
+        })?;
+    tracing::trace!(name_code= ?name_code, "Retrieved JWT");
+
+    if tracing::enabled!(Level::TRACE) {
+        let metadata = Token::decode_metadata(&jwt).map_err(|e| {
+            tracing::error!(name_code = ?name_code, "Failed to decode metadata: {e}");
+            StatusCode::UNAUTHORIZED
+        })?;
+        tracing::trace!(name_code = ?name_code, metadata = ?metadata, "JWT decoded");
+    }
+
+    let user_auth_context = verify_jwt(&app_state.jwt_verification_key, jwt).map_err(|e| {
+        tracing::error!(name_code = ?name_code, "Failed to verify the JWT: {e}");
+        StatusCode::UNAUTHORIZED
+    })?;
+    tracing::trace!(name_code= ?name_code, user_id =?user_auth_context.user_id,
+        "Verified JWT",
+    );
+
+    req.extensions_mut().insert(user_auth_context);
     Ok(next.run(req).await)
 }
 
@@ -78,4 +135,32 @@ fn token_from_header(auth_header: &str) -> eyre::Result<String> {
             .ok_or_eyre("Improperly formatted Bearer auth header");
     }
     bail!("Auth header provided with some other prefix");
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct UserServiceClaims {
+    user_id: String,
+    name_code: String,
+    namespaces: Vec<String>,
+}
+
+fn verify_jwt(jwt_verification_key: &RS256PublicKey, jwt: String) -> eyre::Result<UserAuthContext> {
+    let options = VerificationOptions {
+        allowed_issuers: Some(HashSet::from(["user-service".to_string()])),
+        allowed_audiences: Some(HashSet::from(["ossrh-proxy".to_string()])),
+
+        ..Default::default()
+    };
+
+    let claims = jwt_verification_key
+        .verify_token::<UserServiceClaims>(&jwt, Some(options))
+        .map_err(|e| eyre::eyre!("JWT Verification error:\n{e:#}"))?;
+
+    Ok(UserAuthContext {
+        user_id: claims.custom.user_id,
+        token_username: claims.custom.name_code,
+        namespaces: claims.custom.namespaces,
+        jwt,
+    })
 }

@@ -14,28 +14,28 @@ use repository::traits::Repository;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
-use crate::auth::UserToken;
+use crate::auth::UserAuthContext;
 use crate::errors::ApiError;
 use crate::publish::publish;
 use crate::state::AppState;
 
-#[instrument(skip(app_state, user_token))]
+#[instrument(skip(app_state, user_auth_context))]
 pub(crate) async fn manual_upload_default_repository<R: Repository>(
     Host(host): Host,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     TypedHeader(_user_agent): TypedHeader<UserAgent>,
     State(app_state): State<AppState<R>>,
-    Extension(user_token): Extension<UserToken>,
+    Extension(user_auth_context): Extension<UserAuthContext>,
     Query(params): Query<ManualUploadQueryParams>,
 ) -> Result<StatusCode, ApiError> {
     tracing::debug!("Request to manually uplaod the bundle to Portal");
 
     let repository_key = app_state
         .repository
-        .open_no_profile_repository(&user_token.token_username, &addr.ip())
+        .open_no_profile_repository(&user_auth_context.token_username, &addr.ip())
         .await?;
 
-    let credentials = user_token.as_credentials();
+    let credentials = user_auth_context.as_credentials();
 
     publish(
         &app_state.portal_api_client,

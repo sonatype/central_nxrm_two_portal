@@ -41,8 +41,9 @@
           pname = "nxrm_two_portal";
           version = "0.1.0";
 
-          nativeBuildInputs = [ ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin (with pkgs; [
+          nativeBuildInputs = (with pkgs; [ cmake pkg-config git ]) ++ pkgs.lib.optionals pkgs.stdenv.isDarwin (with pkgs; [
             darwin.apple_sdk.frameworks.SystemConfiguration
+            xcbuild
           ]);
         };
 

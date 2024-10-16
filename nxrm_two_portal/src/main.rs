@@ -1,7 +1,7 @@
 // Copyright (c) 2024-present Sonatype, Inc. All rights reserved.
 // "Sonatype" is a trademark of Sonatype, Inc.
 
-use std::net::SocketAddr;
+use std::{net::SocketAddr, time::Duration};
 
 use auth::auth;
 use axum::{
@@ -9,8 +9,12 @@ use axum::{
     routing::{get, post, put},
     Router,
 };
+use jwt_simple::algorithms::RS256PublicKey;
 use portal_api::PortalApiClient;
-use tokio::net::TcpListener;
+use tokio::fs::File;
+use tokio::io::BufReader;
+use tokio::{io::AsyncReadExt, net::TcpListener};
+use tower_http::{timeout::TimeoutLayer, trace::TraceLayer};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 use repository::local_repository::LocalRepository;
@@ -54,7 +58,23 @@ async fn main() -> eyre::Result<()> {
     let portal_api_client = PortalApiClient::client(&app_config.central_url)?;
     tracing::debug!("Initialized a Portal API client");
 
-    let app_state = AppState::new(local_repository, portal_api_client);
+    let jwt_public_key_file = File::open(&app_config.jwt_public_key_path).await?;
+    let mut jwt_public_key_reader = BufReader::new(jwt_public_key_file);
+    let mut jwt_public_key = String::new();
+    jwt_public_key_reader
+        .read_to_string(&mut jwt_public_key)
+        .await?;
+
+    let jwt_verification_key = RS256PublicKey::from_pem(&jwt_public_key).map_err(|e| {
+        tracing::error!(public_key = ?jwt_public_key, "Error reading Public Key:\n{e:#?}");
+        eyre::eyre!(
+            "Failed to process {:?} as a .pem file RSA256 Public Key",
+            app_config.jwt_public_key_path
+        )
+    })?;
+    tracing::debug!("Loaded the JWT verification key");
+
+    let app_state = AppState::new(local_repository, portal_api_client, jwt_verification_key);
 
     let staging_endpoints = Router::new()
         .route("/profile_evaluate", get(staging_profile_evaluate_endpoint))
@@ -80,17 +100,19 @@ async fn main() -> eyre::Result<()> {
             "/deploy/maven2/*file_path",
             put(staging_deploy_maven2).get(staging_deploy_maven2_get),
         )
-        .route_layer(middleware::from_fn(auth));
+        .route_layer(middleware::from_fn_with_state(app_state.clone(), auth));
 
     let manual_endpoints = Router::new()
         .route("/upload", post(manual_upload_default_repository))
-        .route_layer(middleware::from_fn(auth));
+        .route_layer(middleware::from_fn_with_state(app_state.clone(), auth));
 
     let app = Router::new()
         .route("/service/local/status", get(status_endpoint))
         .nest("/service/local/staging", staging_endpoints)
         .nest("/manual", manual_endpoints)
         .with_state(app_state)
+        .layer(TimeoutLayer::new(Duration::from_secs(5 * 60)))
+        .layer(TraceLayer::new_for_http())
         .fallback(fallback);
 
     tracing::info!("Listening on port: {}", app_config.app_port);

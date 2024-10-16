@@ -76,7 +76,7 @@ impl PortalApiClient {
 
         tracing::trace!("Got response: {:?}", response);
         let jwt = if response.status().is_success() {
-            tracing::info!("JWT request succeeded");
+            tracing::debug!("JWT request succeeded");
             response.text().await?
         } else {
             tracing::debug!("Response body: {:?}", response.text().await?);
@@ -289,7 +289,7 @@ mod tests {
     }
 
     fn common_jwt_test_expectations() -> MockBuilder {
-        Mock::given(method("POST"))
+        Mock::given(method("GET"))
             .and(path("/api/v1/user/usertoken/jwt"))
             .and(header(
                 "Authorization",
