@@ -6,18 +6,16 @@ use std::path::PathBuf;
 use api_types::PublishingType;
 use eyre::ContextCompat;
 use reqwest::{
-    header::{HeaderMap, HeaderValue, USER_AGENT},
+    header::{HeaderMap, HeaderValue, AUTHORIZATION, USER_AGENT},
     multipart::{Form, Part},
-    Body, Client, ClientBuilder,
+    Body, Client, ClientBuilder, RequestBuilder,
 };
 use tokio::fs::File;
 use tokio_util::codec::{BytesCodec, FramedRead};
 use url::Url;
+use user_auth::AsBearerAuthHeader;
 
 pub mod api_types;
-pub mod credentials;
-
-pub use credentials::Credentials;
 
 pub const CENTRAL_HOST: &str = "https://central.sonatype.com";
 
@@ -63,14 +61,17 @@ impl PortalApiClient {
     }
 
     #[tracing::instrument(skip(self, credentials))]
-    pub async fn request_jwt(&self, credentials: &Credentials) -> eyre::Result<String> {
+    pub async fn request_jwt<C: AsBearerAuthHeader>(
+        &self,
+        credentials: &C,
+    ) -> eyre::Result<String> {
         let url = self.host.join(USER_API_ENDPOINT)?.join(JWT_ENDPOINT)?;
         let url_display = url.clone().to_string();
         tracing::trace!("JWT request to {url_display} - Started");
 
         let request = self.client.get(url);
 
-        let request = credentials.add_credentials_to_request(request)?;
+        let request = add_credentials_to_request(credentials, request)?;
 
         let response = request.send().await?;
 
@@ -88,9 +89,9 @@ impl PortalApiClient {
     }
 
     #[tracing::instrument(skip(self, credentials, upload_bundle_contents))]
-    pub async fn upload_from_memory(
+    pub async fn upload_from_memory<C: AsBearerAuthHeader>(
         &self,
-        credentials: &Credentials,
+        credentials: &C,
         deployment_name: &str,
         publishing_type: PublishingType,
         upload_bundle_contents: Vec<u8>,
@@ -107,9 +108,9 @@ impl PortalApiClient {
     }
 
     #[tracing::instrument(skip(self, credentials))]
-    pub async fn upload_from_file(
+    pub async fn upload_from_file<C: AsBearerAuthHeader>(
         &self,
-        credentials: &Credentials,
+        credentials: &C,
         deployment_name: &str,
         publishing_type: PublishingType,
         upload_bundle_path: &PathBuf,
@@ -134,9 +135,9 @@ impl PortalApiClient {
     }
 
     #[tracing::instrument(skip(self, credentials, part))]
-    async fn upload_part(
+    async fn upload_part<C: AsBearerAuthHeader>(
         &self,
-        credentials: &Credentials,
+        credentials: &C,
         deployment_name: &str,
         publishing_type: PublishingType,
         part: Part,
@@ -156,7 +157,8 @@ impl PortalApiClient {
             .query(&[("name", deployment_name)])
             .query(&[("publishingType", publishing_type)])
             .multipart(bundle);
-        let request = credentials.add_credentials_to_request(request)?;
+
+        let request = add_credentials_to_request(credentials, request)?;
 
         let response = request.send().await?;
 
@@ -174,9 +176,20 @@ impl PortalApiClient {
     }
 }
 
+fn add_credentials_to_request<C: AsBearerAuthHeader>(
+    credentials: &C,
+    request: RequestBuilder,
+) -> eyre::Result<RequestBuilder> {
+    let token_header = HeaderValue::from_str(&credentials.as_bearer_auth_header())?;
+    let request = request.header(AUTHORIZATION, token_header);
+    tracing::trace!("Added {AUTHORIZATION} header");
+    Ok(request)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use user_auth::user_token::UserToken;
     use wiremock::matchers::{body_string_contains, header, method, path, query_param};
     use wiremock::{Mock, MockBuilder, MockServer, ResponseTemplate};
 
@@ -191,12 +204,7 @@ mod tests {
 
         let client = PortalApiClient::client(&mock_server.uri())?;
 
-        let jwt = client
-            .request_jwt(&Credentials::from_usertoken(
-                "test_username".to_string(),
-                "test_password".to_string(),
-            ))
-            .await?;
+        let jwt = client.request_jwt(&get_test_user_token()).await?;
 
         assert_eq!(jwt, "FAKE.JWT.STRING");
 
@@ -217,10 +225,7 @@ mod tests {
         let client = PortalApiClient::client(&mock_server.uri())?;
 
         let error = client
-            .request_jwt(&Credentials::from_usertoken(
-                "test_username".to_string(),
-                "test_password".to_string(),
-            ))
+            .request_jwt(&get_test_user_token())
             .await
             .expect_err("Succeeded, incorrectly");
 
@@ -242,10 +247,7 @@ mod tests {
 
         let deployment_id = client
             .upload_from_file(
-                &Credentials::from_usertoken(
-                    "test_username".to_string(),
-                    "test_password".to_string(),
-                ),
+                &get_test_user_token(),
                 "test_deployment",
                 PublishingType::Automatic,
                 &PathBuf::from("Cargo.toml"), // Don't bother with client side validation of the bundle
@@ -272,10 +274,7 @@ mod tests {
 
         let error = client
             .upload_from_file(
-                &Credentials::from_usertoken(
-                    "test_username".to_string(),
-                    "test_password".to_string(),
-                ),
+                &get_test_user_token(),
                 "test_deployment",
                 PublishingType::Automatic,
                 &PathBuf::from("Cargo.toml"), // Don't bother with client side validation of the bundle
@@ -286,6 +285,10 @@ mod tests {
         assert!(error.to_string().contains("Upload request failed"));
 
         Ok(())
+    }
+
+    fn get_test_user_token() -> UserToken {
+        UserToken::new("test_username".to_string(), "test_password".to_string())
     }
 
     fn common_jwt_test_expectations() -> MockBuilder {

@@ -3,6 +3,7 @@ members = [
   "nxrm_two_portal",
   "portal_api",
   "repository",
+  "user_auth",
 ]
 
 resolver = "2"

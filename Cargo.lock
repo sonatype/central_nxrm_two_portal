@@ -1885,14 +1885,12 @@ dependencies = [
  "async-trait",
  "axum",
  "axum-extra",
- "base64 0.22.1",
  "color-eyre",
  "config",
  "ex_em_ell",
  "eyre",
  "futures",
  "itertools 0.13.0",
- "jwt-simple",
  "mime",
  "portal_api",
  "repository",
@@ -1902,6 +1900,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "user_auth",
 ]
 
 [[package]]
@@ -2153,6 +2152,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "user_auth",
  "wiremock",
 ]
 
@@ -2393,6 +2393,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "user_auth",
  "zip",
 ]
 
@@ -3260,6 +3261,18 @@ dependencies = [
  "form_urlencoded",
  "idna",
  "percent-encoding",
+]
+
+[[package]]
+name = "user_auth"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "jwt-simple",
+ "serde",
+ "thiserror",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

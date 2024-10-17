@@ -3,8 +3,9 @@
 
 use clap::Parser;
 use std::{path::PathBuf, sync::Arc};
+use user_auth::user_token::UserToken;
 
-use portal_api::{api_types::PublishingType, Credentials, PortalApiClient, CENTRAL_HOST};
+use portal_api::{api_types::PublishingType, PortalApiClient, CENTRAL_HOST};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 /// An example CLI to upload bundles to Central
@@ -49,7 +50,7 @@ pub async fn main() -> eyre::Result<()> {
 
     let password = rpassword::prompt_password("Publisher token password: ")?;
 
-    let credentials = Arc::new(Credentials::from_usertoken(username, password));
+    let credentials = Arc::new(UserToken::new(username, password));
 
     let api_client = Arc::new(PortalApiClient::client(&host)?);
 
@@ -74,7 +75,7 @@ pub async fn main() -> eyre::Result<()> {
         handles.push(tokio::spawn(async move {
             api_client
                 .upload_from_file(
-                    &credentials,
+                    credentials.as_ref(),
                     &deployment_name,
                     PublishingType::UserManaged,
                     &upload_bundle,

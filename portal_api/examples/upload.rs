@@ -3,10 +3,9 @@
 
 use clap::Parser;
 use std::path::PathBuf;
+use user_auth::user_token::UserToken;
 
-use portal_api::{
-    api_types::PublishingType::Automatic, Credentials, PortalApiClient, CENTRAL_HOST,
-};
+use portal_api::{api_types::PublishingType::Automatic, PortalApiClient, CENTRAL_HOST};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 /// An example CLI to upload bundles to Central
@@ -47,12 +46,9 @@ pub async fn main() -> eyre::Result<()> {
 
     let password = rpassword::prompt_password("Publisher token password: ")?;
 
-    let credentials = Credentials::from_usertoken(username, password);
+    let credentials = UserToken::new(username, password);
 
     let api_client = PortalApiClient::client(&host)?;
-
-    let jwt = api_client.request_jwt(&credentials).await?;
-    let credentials = Credentials::from_jwt(jwt);
 
     let deployment_name = cli.deployment_name.unwrap_or("Upload".to_string());
 

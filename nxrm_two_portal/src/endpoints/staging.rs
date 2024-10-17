@@ -16,8 +16,8 @@ use portal_api::api_types::PublishingType;
 use repository::traits::{Repository, RepositoryKey, RepositoryState};
 use serde::{ser::SerializeMap, Deserialize, Serialize};
 use tracing::instrument;
+use user_auth::jwt::UserAuthContext;
 
-use crate::auth::UserAuthContext;
 use crate::errors::ApiError;
 use crate::extract::{respond_to_accepts_header, XmlOrJson};
 use crate::publish::publish;
@@ -184,12 +184,10 @@ pub(crate) async fn staging_profiles_finish_endpoint<R: Repository>(
         &staging_profiles_finish_request.data.staged_repository_id,
     )?;
 
-    let credentials = user_auth_context.as_credentials();
-
     publish(
         &app_state.portal_api_client,
         app_state.repository.deref(),
-        &credentials,
+        &user_auth_context,
         &repository_key,
         PublishingType::Automatic,
     )
@@ -306,8 +304,6 @@ pub(crate) async fn staging_bulk_close<R: Repository>(
 
     let username = user_auth_context.token_username.clone();
 
-    let credentials = user_auth_context.as_credentials();
-
     for repository_id in staging_bulk_close_request.data.staged_repository_ids {
         let repository_key = RepositoryKey::from_user_context_and_repository_id(
             &username,
@@ -318,7 +314,7 @@ pub(crate) async fn staging_bulk_close<R: Repository>(
         publish(
             &app_state.portal_api_client,
             app_state.repository.deref(),
-            &credentials,
+            &user_auth_context,
             &repository_key,
             PublishingType::Automatic,
         )

@@ -9,11 +9,8 @@ use axum::{
     routing::{get, post, put},
     Router,
 };
-use jwt_simple::algorithms::RS256PublicKey;
 use portal_api::PortalApiClient;
-use tokio::fs::File;
-use tokio::io::BufReader;
-use tokio::{io::AsyncReadExt, net::TcpListener};
+use tokio::net::TcpListener;
 use tower_http::{timeout::TimeoutLayer, trace::TraceLayer};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
@@ -41,6 +38,7 @@ use endpoints::{
     status::status_endpoint,
 };
 use state::AppState;
+use user_auth::jwt::JwtVerifier;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
@@ -58,23 +56,9 @@ async fn main() -> eyre::Result<()> {
     let portal_api_client = PortalApiClient::client(&app_config.central_url)?;
     tracing::debug!("Initialized a Portal API client");
 
-    let jwt_public_key_file = File::open(&app_config.jwt_public_key_path).await?;
-    let mut jwt_public_key_reader = BufReader::new(jwt_public_key_file);
-    let mut jwt_public_key = String::new();
-    jwt_public_key_reader
-        .read_to_string(&mut jwt_public_key)
-        .await?;
+    let jwt_verifier = JwtVerifier::from_key_file(&app_config.jwt_public_key_path).await?;
 
-    let jwt_verification_key = RS256PublicKey::from_pem(&jwt_public_key).map_err(|e| {
-        tracing::error!(public_key = ?jwt_public_key, "Error reading Public Key:\n{e:#?}");
-        eyre::eyre!(
-            "Failed to process {:?} as a .pem file RSA256 Public Key",
-            app_config.jwt_public_key_path
-        )
-    })?;
-    tracing::debug!("Loaded the JWT verification key");
-
-    let app_state = AppState::new(local_repository, portal_api_client, jwt_verification_key);
+    let app_state = AppState::new(local_repository, portal_api_client, jwt_verifier);
 
     let staging_endpoints = Router::new()
         .route("/profile_evaluate", get(staging_profile_evaluate_endpoint))

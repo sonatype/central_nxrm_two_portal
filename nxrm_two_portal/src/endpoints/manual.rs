@@ -13,8 +13,8 @@ use portal_api::api_types::PublishingType;
 use repository::traits::Repository;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
+use user_auth::jwt::UserAuthContext;
 
-use crate::auth::UserAuthContext;
 use crate::errors::ApiError;
 use crate::publish::publish;
 use crate::state::AppState;
@@ -35,12 +35,10 @@ pub(crate) async fn manual_upload_default_repository<R: Repository>(
         .open_no_profile_repository(&user_auth_context.token_username, &addr.ip())
         .await?;
 
-    let credentials = user_auth_context.as_credentials();
-
     publish(
         &app_state.portal_api_client,
         app_state.repository.deref(),
-        &credentials,
+        &user_auth_context,
         &repository_key,
         params.get_publishing_type(),
     )
