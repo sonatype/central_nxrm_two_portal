@@ -31,7 +31,7 @@ pub(crate) async fn staging_profile_evaluate_endpoint(
     Query(query): Query<StagingProfileEvaluateQueryParams>,
 ) -> Result<Response, ApiError> {
     tracing::debug!("Request to match staging profiles");
-    let staging_profile_evaluate = StagingProfilesEvaluateResponse::new(host, query.group);
+    let staging_profile_evaluate = StagingProfilesEvaluateResponse::new(host, &vec![query.group]);
 
     Ok(respond_to_accepts_header(
         &headers,
@@ -51,15 +51,16 @@ pub(crate) struct StagingProfileEvaluateQueryParams {
     group: String,
 }
 
-#[instrument(skip(headers))]
+#[instrument(skip(headers, user_auth_context))]
 pub(crate) async fn staging_profiles_list_endpoint(
     Host(host): Host,
     TypedHeader(_user_agent): TypedHeader<UserAgent>,
     headers: HeaderMap,
+    Extension(user_auth_context): Extension<UserAuthContext>,
 ) -> Result<Response, ApiError> {
     tracing::debug!("Request to get staging profile");
     let staging_profiles =
-        StagingProfilesEvaluateResponse::new(host, "io.github.amy-keibler".to_string()); // TODO: this is hardcoded
+        StagingProfilesEvaluateResponse::new(host, &user_auth_context.namespaces);
 
     Ok(respond_to_accepts_header(&headers, staging_profiles))
 }
@@ -144,6 +145,7 @@ pub(crate) async fn staging_deploy_by_repository_id<R: Repository>(
     app_state
         .repository
         .add_file(
+            &user_auth_context.namespaces,
             &repository_key,
             file_path,
             request
@@ -343,6 +345,7 @@ pub(crate) async fn staging_deploy_maven2<R: Repository>(
     app_state
         .repository
         .add_file(
+            &user_auth_context.namespaces,
             &repository_key,
             file_path,
             request
@@ -375,13 +378,19 @@ pub(crate) struct StagingProfilesEvaluateResponse {
 }
 
 impl StagingProfilesEvaluateResponse {
-    fn new(base_url: String, namespace: String) -> Self {
+    fn new(base_url: String, namespaces: &Vec<String>) -> Self {
+        let staging_profiles = namespaces
+            .iter()
+            .map(|namespace| {
+                StagingProfile::new(
+                    &base_url,
+                    &namespace,
+                    format!("{base_url}/service/local/staging/profile_evaluate/{namespace}"),
+                )
+            })
+            .collect();
         Self {
-            data: vec![StagingProfile::new(
-                &base_url,
-                &namespace,
-                format!("{base_url}/service/local/staging/profile_evaluate/{namespace}"),
-            )],
+            data: staging_profiles,
         }
     }
 }
@@ -625,7 +634,7 @@ mod tests {
     fn test_xml_serialization_staging_profiles_evaluate_response() -> eyre::Result<()> {
         let staging_profiles_evaluate_response = StagingProfilesEvaluateResponse::new(
             "https://s01.oss.sonatype.org".to_string(),
-            "com.example".to_string(),
+            &vec!["com.example".to_string()],
         );
         let actual_xml = ex_em_ell::to_string_pretty(&staging_profiles_evaluate_response)?;
         let expected_xml = r#"<?xml version="1.0" encoding="utf-8"?>
@@ -673,7 +682,7 @@ mod tests {
     fn test_json_serialization_staging_profiles_evaluate_response() -> eyre::Result<()> {
         let staging_profiles_evaluate_response = StagingProfilesEvaluateResponse::new(
             "https://s01.oss.sonatype.org".to_string(),
-            "com.example".to_string(),
+            &vec!["com.example".to_string()],
         );
         let actual_json = serde_json::to_string_pretty(&staging_profiles_evaluate_response)?;
         let expected_json = r#"{

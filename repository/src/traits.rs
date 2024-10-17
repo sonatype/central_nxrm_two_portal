@@ -44,6 +44,7 @@ pub trait Repository {
 
     async fn add_file<P, S>(
         &self,
+        authorized_namespaces: &[String],
         repository_key: &RepositoryKey,
         file_path: P,
         file_contents: S,
