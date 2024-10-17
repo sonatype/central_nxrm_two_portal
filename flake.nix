@@ -42,6 +42,7 @@
           version = "0.1.0";
 
           buildInputs = with pkgs; [ libclang ];
+          LIBCLANG_PATH="${pkgs.libclang}/lib";
 
           nativeBuildInputs = (with pkgs; [ cmake pkg-config git clang ]) ++ pkgs.lib.optionals pkgs.stdenv.isDarwin (with pkgs; [
             darwin.apple_sdk.frameworks.SystemConfiguration
