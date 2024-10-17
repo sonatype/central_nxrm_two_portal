@@ -378,13 +378,13 @@ pub(crate) struct StagingProfilesEvaluateResponse {
 }
 
 impl StagingProfilesEvaluateResponse {
-    fn new(base_url: String, namespaces: &Vec<String>) -> Self {
+    fn new(base_url: String, namespaces: &[String]) -> Self {
         let staging_profiles = namespaces
             .iter()
             .map(|namespace| {
                 StagingProfile::new(
                     &base_url,
-                    &namespace,
+                    namespace,
                     format!("{base_url}/service/local/staging/profile_evaluate/{namespace}"),
                 )
             })

@@ -48,7 +48,7 @@ impl JwtVerifier {
             .await?;
 
         let public_key = RS256PublicKey::from_pem(&jwt_public_key)?;
-        tracing::debug!("Loaded the JWT verification key");
+        tracing::info!("Loaded the JWT verification key");
 
         Ok(Self { public_key })
     }
