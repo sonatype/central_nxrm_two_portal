@@ -1,6 +1,8 @@
 // Copyright (c) 2024-present Sonatype, Inc. All rights reserved.
 // "Sonatype" is a trademark of Sonatype, Inc.
 
+use std::path::PathBuf;
+
 use config::{Config, Environment};
 use portal_api::CENTRAL_HOST;
 use serde::Deserialize;
@@ -9,6 +11,7 @@ use serde::Deserialize;
 pub(crate) struct AppConfig {
     pub central_url: String,
     pub app_port: u16,
+    pub jwt_public_key_path: PathBuf,
 }
 
 impl AppConfig {

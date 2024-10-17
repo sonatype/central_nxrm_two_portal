@@ -1,15 +1,16 @@
 // Copyright (c) 2024-present Sonatype, Inc. All rights reserved.
 // "Sonatype" is a trademark of Sonatype, Inc.
 
-use portal_api::{api_types::PublishingType, Credentials, PortalApiClient};
+use portal_api::{api_types::PublishingType, PortalApiClient};
 use repository::traits::{Repository, RepositoryKey};
 use tracing::instrument;
+use user_auth::AsBearerAuthHeader;
 
 #[instrument(skip(portal_api_client, repository, credentials))]
-pub async fn publish<R: Repository>(
+pub async fn publish<R: Repository, C: AsBearerAuthHeader>(
     portal_api_client: &PortalApiClient,
     repository: &R,
-    credentials: &Credentials,
+    credentials: &C,
     repository_key: &RepositoryKey,
     publishing_type: PublishingType,
 ) -> eyre::Result<()> {

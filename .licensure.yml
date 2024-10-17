@@ -33,3 +33,4 @@ excludes:
   - \.envrc
   - \.github/**
   - .*\.xml
+  - .*\.pem

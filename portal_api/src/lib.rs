@@ -6,23 +6,24 @@ use std::path::PathBuf;
 use api_types::PublishingType;
 use eyre::ContextCompat;
 use reqwest::{
-    header::{HeaderMap, HeaderValue, USER_AGENT},
+    header::{HeaderMap, HeaderValue, AUTHORIZATION, USER_AGENT},
     multipart::{Form, Part},
-    Body, Client, ClientBuilder,
+    Body, Client, ClientBuilder, RequestBuilder,
 };
 use tokio::fs::File;
 use tokio_util::codec::{BytesCodec, FramedRead};
 use url::Url;
+use user_auth::AsBearerAuthHeader;
 
 pub mod api_types;
-pub mod credentials;
-
-pub use credentials::Credentials;
 
 pub const CENTRAL_HOST: &str = "https://central.sonatype.com";
 
-const API_ENDPOINT: &str = "/api/v1/publisher/";
+const PUBLISHER_API_ENDPOINT: &str = "/api/v1/publisher/";
 const UPLOAD_ENDPOINT: &str = "upload"; // relative to API_ENDPOINT
+
+const USER_API_ENDPOINT: &str = "/api/v1/user/";
+const JWT_ENDPOINT: &str = "usertoken/jwt";
 
 const UPLOAD_MIME_STR: &str = "application/octet-stream";
 
@@ -59,10 +60,38 @@ impl PortalApiClient {
         Ok(Self { client, host })
     }
 
-    #[tracing::instrument(skip(self, credentials, upload_bundle_contents))]
-    pub async fn upload_from_memory(
+    #[tracing::instrument(skip(self, credentials))]
+    pub async fn request_jwt<C: AsBearerAuthHeader>(
         &self,
-        credentials: &Credentials,
+        credentials: &C,
+    ) -> eyre::Result<String> {
+        let url = self.host.join(USER_API_ENDPOINT)?.join(JWT_ENDPOINT)?;
+        let url_display = url.clone().to_string();
+        tracing::trace!("JWT request to {url_display} - Started");
+
+        let request = self.client.get(url);
+
+        let request = add_credentials_to_request(credentials, request)?;
+
+        let response = request.send().await?;
+
+        tracing::trace!("Got response: {:?}", response);
+        let jwt = if response.status().is_success() {
+            tracing::debug!("JWT request succeeded");
+            response.text().await?
+        } else {
+            tracing::debug!("Response body: {:?}", response.text().await?);
+            eyre::bail!("JWT request failed");
+        };
+        tracing::trace!("JWT request to {url_display} - Complete");
+
+        Ok(jwt)
+    }
+
+    #[tracing::instrument(skip(self, credentials, upload_bundle_contents))]
+    pub async fn upload_from_memory<C: AsBearerAuthHeader>(
+        &self,
+        credentials: &C,
         deployment_name: &str,
         publishing_type: PublishingType,
         upload_bundle_contents: Vec<u8>,
@@ -79,9 +108,9 @@ impl PortalApiClient {
     }
 
     #[tracing::instrument(skip(self, credentials))]
-    pub async fn upload_from_file(
+    pub async fn upload_from_file<C: AsBearerAuthHeader>(
         &self,
-        credentials: &Credentials,
+        credentials: &C,
         deployment_name: &str,
         publishing_type: PublishingType,
         upload_bundle_path: &PathBuf,
@@ -106,14 +135,17 @@ impl PortalApiClient {
     }
 
     #[tracing::instrument(skip(self, credentials, part))]
-    async fn upload_part(
+    async fn upload_part<C: AsBearerAuthHeader>(
         &self,
-        credentials: &Credentials,
+        credentials: &C,
         deployment_name: &str,
         publishing_type: PublishingType,
         part: Part,
     ) -> eyre::Result<String> {
-        let url = self.host.join(API_ENDPOINT)?.join(UPLOAD_ENDPOINT)?;
+        let url = self
+            .host
+            .join(PUBLISHER_API_ENDPOINT)?
+            .join(UPLOAD_ENDPOINT)?;
         let url_display = url.clone().to_string();
         tracing::trace!("Upload request to {url_display} - Started");
 
@@ -125,7 +157,8 @@ impl PortalApiClient {
             .query(&[("name", deployment_name)])
             .query(&[("publishingType", publishing_type)])
             .multipart(bundle);
-        let request = credentials.add_credentials_to_request(request)?;
+
+        let request = add_credentials_to_request(credentials, request)?;
 
         let response = request.send().await?;
 
@@ -143,17 +176,69 @@ impl PortalApiClient {
     }
 }
 
+fn add_credentials_to_request<C: AsBearerAuthHeader>(
+    credentials: &C,
+    request: RequestBuilder,
+) -> eyre::Result<RequestBuilder> {
+    let token_header = HeaderValue::from_str(&credentials.as_bearer_auth_header())?;
+    let request = request.header(AUTHORIZATION, token_header);
+    tracing::trace!("Added {AUTHORIZATION} header");
+    Ok(request)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use user_auth::user_token::UserToken;
     use wiremock::matchers::{body_string_contains, header, method, path, query_param};
     use wiremock::{Mock, MockBuilder, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn successful_jwt_request() -> eyre::Result<()> {
+        let mock_server = MockServer::start().await;
+
+        common_jwt_test_expectations()
+            .respond_with(ResponseTemplate::new(200).set_body_string("FAKE.JWT.STRING"))
+            .mount(&mock_server)
+            .await;
+
+        let client = PortalApiClient::client(&mock_server.uri())?;
+
+        let jwt = client.request_jwt(&get_test_user_token()).await?;
+
+        assert_eq!(jwt, "FAKE.JWT.STRING");
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn failed_jwt_request() -> eyre::Result<()> {
+        let mock_server = MockServer::start().await;
+
+        common_jwt_test_expectations()
+            .respond_with(
+                ResponseTemplate::new(401).set_body_string(r#"{"error": "example_error"}"#),
+            )
+            .mount(&mock_server)
+            .await;
+
+        let client = PortalApiClient::client(&mock_server.uri())?;
+
+        let error = client
+            .request_jwt(&get_test_user_token())
+            .await
+            .expect_err("Succeeded, incorrectly");
+
+        assert!(error.to_string().contains("JWT request failed"));
+
+        Ok(())
+    }
 
     #[tokio::test]
     async fn successful_upload() -> eyre::Result<()> {
         let mock_server = MockServer::start().await;
 
-        common_test_expectations()
+        common_upload_test_expectations()
             .respond_with(ResponseTemplate::new(200).set_body_string("test_deployment_id"))
             .mount(&mock_server)
             .await;
@@ -162,7 +247,7 @@ mod tests {
 
         let deployment_id = client
             .upload_from_file(
-                &Credentials::new("test_username".to_string(), "test_password".to_string()),
+                &get_test_user_token(),
                 "test_deployment",
                 PublishingType::Automatic,
                 &PathBuf::from("Cargo.toml"), // Don't bother with client side validation of the bundle
@@ -178,7 +263,7 @@ mod tests {
     async fn failed_upload() -> eyre::Result<()> {
         let mock_server = MockServer::start().await;
 
-        common_test_expectations()
+        common_upload_test_expectations()
             .respond_with(
                 ResponseTemplate::new(500).set_body_string(r#"{"error": "example_error"}"#),
             )
@@ -189,7 +274,7 @@ mod tests {
 
         let error = client
             .upload_from_file(
-                &Credentials::new("test_username".to_string(), "test_password".to_string()),
+                &get_test_user_token(),
                 "test_deployment",
                 PublishingType::Automatic,
                 &PathBuf::from("Cargo.toml"), // Don't bother with client side validation of the bundle
@@ -202,12 +287,25 @@ mod tests {
         Ok(())
     }
 
-    fn common_test_expectations() -> MockBuilder {
+    fn get_test_user_token() -> UserToken {
+        UserToken::new("test_username".to_string(), "test_password".to_string())
+    }
+
+    fn common_jwt_test_expectations() -> MockBuilder {
+        Mock::given(method("GET"))
+            .and(path("/api/v1/user/usertoken/jwt"))
+            .and(header(
+                "Authorization",
+                "Bearer dGVzdF91c2VybmFtZTp0ZXN0X3Bhc3N3b3Jk",
+            ))
+    }
+
+    fn common_upload_test_expectations() -> MockBuilder {
         Mock::given(method("POST"))
             .and(path("/api/v1/publisher/upload"))
             .and(header(
                 "Authorization",
-                "UserToken dGVzdF91c2VybmFtZTp0ZXN0X3Bhc3N3b3Jk",
+                "Bearer dGVzdF91c2VybmFtZTp0ZXN0X3Bhc3N3b3Jk",
             ))
             .and(query_param("name", "test_deployment"))
             .and(query_param("publishingType", "AUTOMATIC"))

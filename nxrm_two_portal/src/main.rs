@@ -1,7 +1,7 @@
 // Copyright (c) 2024-present Sonatype, Inc. All rights reserved.
 // "Sonatype" is a trademark of Sonatype, Inc.
 
-use std::net::SocketAddr;
+use std::{net::SocketAddr, time::Duration};
 
 use auth::auth;
 use axum::{
@@ -11,6 +11,7 @@ use axum::{
 };
 use portal_api::PortalApiClient;
 use tokio::net::TcpListener;
+use tower_http::{timeout::TimeoutLayer, trace::TraceLayer};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 use repository::local_repository::LocalRepository;
@@ -37,6 +38,7 @@ use endpoints::{
     status::status_endpoint,
 };
 use state::AppState;
+use user_auth::jwt::JwtVerifier;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
@@ -54,7 +56,9 @@ async fn main() -> eyre::Result<()> {
     let portal_api_client = PortalApiClient::client(&app_config.central_url)?;
     tracing::debug!("Initialized a Portal API client");
 
-    let app_state = AppState::new(local_repository, portal_api_client);
+    let jwt_verifier = JwtVerifier::from_key_file(&app_config.jwt_public_key_path).await?;
+
+    let app_state = AppState::new(local_repository, portal_api_client, jwt_verifier);
 
     let staging_endpoints = Router::new()
         .route("/profile_evaluate", get(staging_profile_evaluate_endpoint))
@@ -80,17 +84,19 @@ async fn main() -> eyre::Result<()> {
             "/deploy/maven2/*file_path",
             put(staging_deploy_maven2).get(staging_deploy_maven2_get),
         )
-        .route_layer(middleware::from_fn(auth));
+        .route_layer(middleware::from_fn_with_state(app_state.clone(), auth));
 
     let manual_endpoints = Router::new()
         .route("/upload", post(manual_upload_default_repository))
-        .route_layer(middleware::from_fn(auth));
+        .route_layer(middleware::from_fn_with_state(app_state.clone(), auth));
 
     let app = Router::new()
         .route("/service/local/status", get(status_endpoint))
         .nest("/service/local/staging", staging_endpoints)
         .nest("/manual", manual_endpoints)
         .with_state(app_state)
+        .layer(TimeoutLayer::new(Duration::from_secs(5 * 60)))
+        .layer(TraceLayer::new_for_http())
         .fallback(fallback);
 
     tracing::info!("Listening on port: {}", app_config.app_port);

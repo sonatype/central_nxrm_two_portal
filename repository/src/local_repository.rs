@@ -252,6 +252,7 @@ impl Repository for LocalRepository {
     #[instrument(skip(file_contents))]
     async fn add_file<P, S>(
         &self,
+        authorized_namespaces: &[String],
         repository_key: &RepositoryKey,
         file_path: P,
         file_contents: S,
@@ -261,6 +262,16 @@ impl Repository for LocalRepository {
         S: Stream<Item = eyre::Result<Bytes>> + Send,
     {
         tracing::debug!("Adding file to repository: {repository_key}");
+
+        let related_to_an_authorized_namespace = authorized_namespaces
+            .iter()
+            .map(|namespace| namespace.replace('.', "/"))
+            .any(|prefix| file_path.as_ref().starts_with(prefix));
+
+        if !related_to_an_authorized_namespace {
+            eyre::bail!("File is not associated with an authorized namespace");
+        }
+
         self.validate_repository(repository_key).await?;
         let file_path = self.validated_path_in_repository(repository_key, file_path)?;
         let parent = file_path
@@ -408,7 +419,12 @@ mod tests {
 
         // add a file
         local_repository
-            .add_file(&repository_key, test_file_path, file_contents)
+            .add_file(
+                &vec!["com.example".to_string()],
+                &repository_key,
+                test_file_path,
+                file_contents,
+            )
             .await?;
 
         // finish the repository
@@ -448,8 +464,9 @@ mod tests {
         // add a file
         if let Err(e) = local_repository
             .add_file(
+                &vec!["com.example".to_string()],
                 &repository_key,
-                "../../other_test_user/other_test_repository/com/example/file.txt",
+                "com/example/../../../../other_test_user/other_test_repository/com/example/file.txt",
                 file_contents,
             )
             .await
@@ -457,6 +474,41 @@ mod tests {
             assert!(e.to_string().contains("Invalid path to upload"));
         } else {
             eyre::bail!("Failed to prevent directory traversal");
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn reject_unauthorized_namespace() -> eyre::Result<()> {
+        let local_repository = LocalRepository::new()?;
+
+        // start the repository
+        let repository_key = local_repository
+            .start(
+                "test_user",
+                &IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                "test_profile",
+            )
+            .await?;
+
+        let file_contents = futures::stream::once(async { Ok(Bytes::from("test_file_content")) });
+
+        // add a file
+        if let Err(e) = local_repository
+            .add_file(
+                &vec!["com.example".to_string()],
+                &repository_key,
+                "com/other/example/file.txt",
+                file_contents,
+            )
+            .await
+        {
+            assert!(e
+                .to_string()
+                .contains("File is not associated with an authorized namespace"));
+        } else {
+            eyre::bail!("Failed to prevent invalid namespace file");
         }
 
         Ok(())

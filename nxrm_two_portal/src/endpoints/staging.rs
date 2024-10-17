@@ -16,8 +16,8 @@ use portal_api::api_types::PublishingType;
 use repository::traits::{Repository, RepositoryKey, RepositoryState};
 use serde::{ser::SerializeMap, Deserialize, Serialize};
 use tracing::instrument;
+use user_auth::jwt::UserAuthContext;
 
-use crate::auth::UserToken;
 use crate::errors::ApiError;
 use crate::extract::{respond_to_accepts_header, XmlOrJson};
 use crate::publish::publish;
@@ -31,7 +31,7 @@ pub(crate) async fn staging_profile_evaluate_endpoint(
     Query(query): Query<StagingProfileEvaluateQueryParams>,
 ) -> Result<Response, ApiError> {
     tracing::debug!("Request to match staging profiles");
-    let staging_profile_evaluate = StagingProfilesEvaluateResponse::new(host, query.group);
+    let staging_profile_evaluate = StagingProfilesEvaluateResponse::new(host, &vec![query.group]);
 
     Ok(respond_to_accepts_header(
         &headers,
@@ -51,15 +51,16 @@ pub(crate) struct StagingProfileEvaluateQueryParams {
     group: String,
 }
 
-#[instrument(skip(headers))]
+#[instrument(skip(headers, user_auth_context))]
 pub(crate) async fn staging_profiles_list_endpoint(
     Host(host): Host,
     TypedHeader(_user_agent): TypedHeader<UserAgent>,
     headers: HeaderMap,
+    Extension(user_auth_context): Extension<UserAuthContext>,
 ) -> Result<Response, ApiError> {
     tracing::debug!("Request to get staging profile");
     let staging_profiles =
-        StagingProfilesEvaluateResponse::new(host, "io.github.amy-keibler".to_string()); // TODO: this is hardcoded
+        StagingProfilesEvaluateResponse::new(host, &user_auth_context.namespaces);
 
     Ok(respond_to_accepts_header(&headers, staging_profiles))
 }
@@ -77,7 +78,7 @@ pub(crate) async fn staging_profiles_endpoint(
     Ok(respond_to_accepts_header(&headers, staging_profiles))
 }
 
-#[instrument(skip(headers, app_state, user_token, staging_profiles_start_request))]
+#[instrument(skip(headers, app_state, user_auth_context, staging_profiles_start_request))]
 pub(crate) async fn staging_profiles_start_endpoint<R: Repository>(
     Host(host): Host,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
@@ -85,14 +86,14 @@ pub(crate) async fn staging_profiles_start_endpoint<R: Repository>(
     headers: HeaderMap,
     Path(profile_id): Path<String>,
     State(app_state): State<AppState<R>>,
-    Extension(user_token): Extension<UserToken>,
+    Extension(user_auth_context): Extension<UserAuthContext>,
     XmlOrJson(staging_profiles_start_request): XmlOrJson<StagingProfilesStartRequest>,
 ) -> Result<Response, ApiError> {
     tracing::debug!("Request to start staging profile");
 
     let repository = app_state
         .repository
-        .start(&user_token.token_username, &addr.ip(), &profile_id)
+        .start(&user_auth_context.token_username, &addr.ip(), &profile_id)
         .await?;
 
     let staging_profiles_start_response = StagingProfilesPromoteResponse::new(
@@ -119,13 +120,13 @@ pub(crate) struct StagingProfilesStartRequestData {
     description: String,
 }
 
-#[instrument(skip(app_state, user_token, request))]
+#[instrument(skip(app_state, user_auth_context, request))]
 pub(crate) async fn staging_deploy_by_repository_id<R: Repository>(
     TypedHeader(_user_agent): TypedHeader<UserAgent>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Path((repository_id, file_path)): Path<(String, String)>,
     State(app_state): State<AppState<R>>,
-    Extension(user_token): Extension<UserToken>,
+    Extension(user_auth_context): Extension<UserAuthContext>,
     request: Request,
 ) -> Result<impl IntoResponse, ApiError> {
     tracing::debug!("Request to upload file to staging repository");
@@ -136,7 +137,7 @@ pub(crate) async fn staging_deploy_by_repository_id<R: Repository>(
     }
 
     let repository_key = RepositoryKey::from_user_context_and_repository_id(
-        &user_token.token_username,
+        &user_auth_context.token_username,
         &addr.ip(),
         &repository_id,
     )?;
@@ -144,6 +145,7 @@ pub(crate) async fn staging_deploy_by_repository_id<R: Repository>(
     app_state
         .repository
         .add_file(
+            &user_auth_context.namespaces,
             &repository_key,
             file_path,
             request
@@ -166,30 +168,28 @@ pub(crate) async fn staging_deploy_by_repository_id_get(
     Ok(StatusCode::NOT_FOUND)
 }
 
-#[instrument(skip(app_state, user_token, staging_profiles_finish_request))]
+#[instrument(skip(app_state, user_auth_context, staging_profiles_finish_request))]
 pub(crate) async fn staging_profiles_finish_endpoint<R: Repository>(
     Host(host): Host,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     TypedHeader(_user_agent): TypedHeader<UserAgent>,
     Path(profile_id): Path<String>,
     State(app_state): State<AppState<R>>,
-    Extension(user_token): Extension<UserToken>,
+    Extension(user_auth_context): Extension<UserAuthContext>,
     XmlOrJson(staging_profiles_finish_request): XmlOrJson<StagingProfilesFinishRequest>,
 ) -> Result<StatusCode, ApiError> {
     tracing::debug!("Request to finish profile");
 
     let repository_key = RepositoryKey::from_user_context_and_repository_id(
-        &user_token.token_username,
+        &user_auth_context.token_username,
         &addr.ip(),
         &staging_profiles_finish_request.data.staged_repository_id,
     )?;
 
-    let credentials = user_token.as_credentials();
-
     publish(
         &app_state.portal_api_client,
         app_state.repository.deref(),
-        &credentials,
+        &user_auth_context,
         &repository_key,
         PublishingType::Automatic,
     )
@@ -212,7 +212,7 @@ pub(crate) struct StagingProfilesFinishRequestData {
     description: String,
 }
 
-#[instrument(skip(headers, app_state, user_token))]
+#[instrument(skip(headers, app_state, user_auth_context))]
 pub(crate) async fn staging_repository<R: Repository>(
     Host(host): Host,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
@@ -220,12 +220,12 @@ pub(crate) async fn staging_repository<R: Repository>(
     headers: HeaderMap,
     Path(repository_id): Path<String>,
     State(app_state): State<AppState<R>>,
-    Extension(user_token): Extension<UserToken>,
+    Extension(user_auth_context): Extension<UserAuthContext>,
 ) -> Result<Response, ApiError> {
     tracing::debug!("Request to get repository");
 
     let repository_key = RepositoryKey::from_user_context_and_repository_id(
-        &user_token.token_username,
+        &user_auth_context.token_username,
         &addr.ip(),
         &repository_id,
     )?;
@@ -237,13 +237,13 @@ pub(crate) async fn staging_repository<R: Repository>(
     Ok(respond_to_accepts_header(&headers, response))
 }
 
-#[instrument(skip(app_state, user_token, staging_bulk_promote_request))]
+#[instrument(skip(app_state, user_auth_context, staging_bulk_promote_request))]
 pub(crate) async fn staging_bulk_promote<R: Repository>(
     Host(host): Host,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     TypedHeader(_user_agent): TypedHeader<UserAgent>,
     State(app_state): State<AppState<R>>,
-    Extension(user_token): Extension<UserToken>,
+    Extension(user_auth_context): Extension<UserAuthContext>,
 
     XmlOrJson(staging_bulk_promote_request): XmlOrJson<StagingBulkPromoteRequest>,
 ) -> Result<StatusCode, ApiError> {
@@ -259,7 +259,7 @@ pub(crate) async fn staging_bulk_promote<R: Repository>(
 
     for repository_id in staging_bulk_promote_request.data.staged_repository_ids {
         let repository_key = RepositoryKey::from_user_context_and_repository_id(
-            &user_token.token_username,
+            &user_auth_context.token_username,
             &addr.ip(),
             &repository_id.0,
         )?;
@@ -285,13 +285,13 @@ pub(crate) struct StagingBulkPromoteRequestData {
     auto_drop_after_release: bool,
 }
 
-#[instrument(skip(app_state, user_token, staging_bulk_close_request))]
+#[instrument(skip(app_state, user_auth_context, staging_bulk_close_request))]
 pub(crate) async fn staging_bulk_close<R: Repository>(
     Host(host): Host,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     TypedHeader(_user_agent): TypedHeader<UserAgent>,
     State(app_state): State<AppState<R>>,
-    Extension(user_token): Extension<UserToken>,
+    Extension(user_auth_context): Extension<UserAuthContext>,
     XmlOrJson(staging_bulk_close_request): XmlOrJson<StagingBulkPromoteRequest>,
 ) -> Result<StatusCode, ApiError> {
     tracing::debug!(
@@ -304,9 +304,7 @@ pub(crate) async fn staging_bulk_close<R: Repository>(
             .join(", ")
     );
 
-    let username = user_token.token_username.clone();
-
-    let credentials = user_token.as_credentials();
+    let username = user_auth_context.token_username.clone();
 
     for repository_id in staging_bulk_close_request.data.staged_repository_ids {
         let repository_key = RepositoryKey::from_user_context_and_repository_id(
@@ -318,7 +316,7 @@ pub(crate) async fn staging_bulk_close<R: Repository>(
         publish(
             &app_state.portal_api_client,
             app_state.repository.deref(),
-            &credentials,
+            &user_auth_context,
             &repository_key,
             PublishingType::Automatic,
         )
@@ -328,25 +326,26 @@ pub(crate) async fn staging_bulk_close<R: Repository>(
     Ok(StatusCode::OK)
 }
 
-#[instrument(skip(app_state, user_token, request))]
+#[instrument(skip(app_state, user_auth_context, request))]
 pub(crate) async fn staging_deploy_maven2<R: Repository>(
     TypedHeader(_user_agent): TypedHeader<UserAgent>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Path(file_path): Path<String>,
     State(app_state): State<AppState<R>>,
-    Extension(user_token): Extension<UserToken>,
+    Extension(user_auth_context): Extension<UserAuthContext>,
     request: Request,
 ) -> Result<impl IntoResponse, ApiError> {
     tracing::debug!("Request to upload file to staging repository");
 
     let repository_key = app_state
         .repository
-        .open_no_profile_repository(&user_token.token_username, &addr.ip())
+        .open_no_profile_repository(&user_auth_context.token_username, &addr.ip())
         .await?;
 
     app_state
         .repository
         .add_file(
+            &user_auth_context.namespaces,
             &repository_key,
             file_path,
             request
@@ -359,12 +358,12 @@ pub(crate) async fn staging_deploy_maven2<R: Repository>(
     Ok(StatusCode::CREATED)
 }
 
-#[instrument(skip(_app_state, _user_token))]
+#[instrument(skip(_app_state, _user_auth_context))]
 pub(crate) async fn staging_deploy_maven2_get<R: Repository>(
     TypedHeader(_user_agent): TypedHeader<UserAgent>,
     Path(file_path): Path<String>,
     State(_app_state): State<AppState<R>>,
-    Extension(_user_token): Extension<UserToken>,
+    Extension(_user_auth_context): Extension<UserAuthContext>,
 ) -> Result<impl IntoResponse, ApiError> {
     tracing::debug!("Request to get a file from a staging repository");
 
@@ -379,13 +378,19 @@ pub(crate) struct StagingProfilesEvaluateResponse {
 }
 
 impl StagingProfilesEvaluateResponse {
-    fn new(base_url: String, namespace: String) -> Self {
+    fn new(base_url: String, namespaces: &[String]) -> Self {
+        let staging_profiles = namespaces
+            .iter()
+            .map(|namespace| {
+                StagingProfile::new(
+                    &base_url,
+                    namespace,
+                    format!("{base_url}/service/local/staging/profile_evaluate/{namespace}"),
+                )
+            })
+            .collect();
         Self {
-            data: vec![StagingProfile::new(
-                &base_url,
-                &namespace,
-                format!("{base_url}/service/local/staging/profile_evaluate/{namespace}"),
-            )],
+            data: staging_profiles,
         }
     }
 }
@@ -629,7 +634,7 @@ mod tests {
     fn test_xml_serialization_staging_profiles_evaluate_response() -> eyre::Result<()> {
         let staging_profiles_evaluate_response = StagingProfilesEvaluateResponse::new(
             "https://s01.oss.sonatype.org".to_string(),
-            "com.example".to_string(),
+            &vec!["com.example".to_string()],
         );
         let actual_xml = ex_em_ell::to_string_pretty(&staging_profiles_evaluate_response)?;
         let expected_xml = r#"<?xml version="1.0" encoding="utf-8"?>
@@ -677,7 +682,7 @@ mod tests {
     fn test_json_serialization_staging_profiles_evaluate_response() -> eyre::Result<()> {
         let staging_profiles_evaluate_response = StagingProfilesEvaluateResponse::new(
             "https://s01.oss.sonatype.org".to_string(),
-            "com.example".to_string(),
+            &vec!["com.example".to_string()],
         );
         let actual_json = serde_json::to_string_pretty(&staging_profiles_evaluate_response)?;
         let expected_json = r#"{

@@ -2,43 +2,24 @@
 // "Sonatype" is a trademark of Sonatype, Inc.
 
 use axum::{
-    extract::Request,
+    extract::{Request, State},
     http::{header::AUTHORIZATION, StatusCode},
     middleware::Next,
     response::Response,
 };
-use base64::prelude::{Engine, BASE64_STANDARD};
 use eyre::{bail, OptionExt};
-use portal_api::Credentials;
+use repository::traits::Repository;
 use tracing::instrument;
+use user_auth::user_token::UserToken;
 
-#[derive(Clone)]
-pub struct UserToken {
-    pub token_username: String,
-    token_password: String,
-}
+use crate::state::AppState;
 
-impl UserToken {
-    pub fn from_token(token: &str) -> eyre::Result<Self> {
-        let token = BASE64_STANDARD.decode(token)?;
-        let token = String::from_utf8(token)?;
-        let (token_username, token_password) = token
-            .split_once(':')
-            .ok_or_eyre("Failed to extract a valid user token")?;
-
-        Ok(Self {
-            token_username: token_username.to_string(),
-            token_password: token_password.to_string(),
-        })
-    }
-
-    pub fn as_credentials(self) -> Credentials {
-        Credentials::new(self.token_username, self.token_password)
-    }
-}
-
-#[instrument(skip(req, next))]
-pub async fn auth(mut req: Request, next: Next) -> Result<Response, StatusCode> {
+#[instrument(skip(app_state, req, next))]
+pub async fn auth<R: Repository>(
+    State(app_state): State<AppState<R>>,
+    mut req: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
     let auth_header = req
         .headers()
         .get(AUTHORIZATION)
@@ -56,7 +37,28 @@ pub async fn auth(mut req: Request, next: Next) -> Result<Response, StatusCode> 
         tracing::error!("Failed to decode user token: {e}");
         StatusCode::UNAUTHORIZED
     })?;
-    req.extensions_mut().insert(user_token);
+    let name_code = user_token.token_username.clone();
+    tracing::trace!(name_code = ?name_code, "Parsed user token from header");
+
+    let jwt = app_state
+        .portal_api_client
+        .request_jwt(&user_token)
+        .await
+        .map_err(|e| {
+            tracing::error!(name_code = ?name_code, "Failed to request a JWT: {e}");
+            StatusCode::UNAUTHORIZED
+        })?;
+    tracing::trace!(name_code= ?name_code, "Retrieved JWT");
+
+    let user_auth_context = app_state.jwt_verifier.verify_jwt(jwt).map_err(|e| {
+        tracing::error!(name_code = ?name_code, "Failed to verify the JWT: {e}");
+        StatusCode::UNAUTHORIZED
+    })?;
+    tracing::trace!(name_code= ?name_code, user_id =?user_auth_context.user_id,
+        "Verified JWT",
+    );
+
+    req.extensions_mut().insert(user_auth_context);
     Ok(next.run(req).await)
 }
 
